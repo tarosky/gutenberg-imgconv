@@ -2,8 +2,12 @@ package imgconv
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"image"
 	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	// Load image types for decoding
@@ -17,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/chai2010/webp"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
@@ -33,13 +38,17 @@ const (
 
 // Config specifies configuration values given by CloudFormation Stack.
 type Config struct {
-	Region       string
-	S3Bucket     string
-	S3KeyBase    string
-	SQSQueueURL  string
-	EFSMountPath string
-	WebPQuality  uint8
-	Log          *zap.Logger
+	Region               string
+	S3Bucket             string
+	S3KeyBase            string
+	SQSQueueURL          string
+	SQSVisibilityTimeout uint
+	EFSMountPath         string
+	WebPQuality          uint8
+	WorkerCount          uint8
+	RetrieverCount       uint8
+	DeleterCount         uint8
+	Log                  *zap.Logger
 }
 
 func createLogger() *zap.Logger {
@@ -57,6 +66,214 @@ func Init(cfg *Config) {
 	s3UploaderClient = s3manager.NewUploader(awsSession)
 	sqsClient = sqs.New(awsSession)
 	config = cfg
+}
+
+type task struct {
+	Path          string `json:"path"`
+	succeeded     bool
+	messageID     string
+	receiptHandle string
+}
+
+func worker(ctx context.Context, inputCh <-chan *task, outputCh chan<- *task) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t, ok := <-inputCh:
+			if !ok {
+				return
+			}
+			t.succeeded = Convert(t.Path)
+			outputCh <- t
+		}
+	}
+}
+
+func retriever(ctx context.Context, outputCh chan<- *task) {
+	ten := int64(10)
+	vt := int64(config.SQSVisibilityTimeout)
+	sqsInput := &sqs.ReceiveMessageInput{
+		QueueUrl:            &config.SQSQueueURL,
+		MaxNumberOfMessages: &ten,
+		VisibilityTimeout:   &vt,
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			res, err := sqsClient.ReceiveMessageWithContext(ctx, sqsInput)
+			if err != nil {
+				log.Error("failed to receive SQS message", zap.Error(err))
+				continue
+			}
+
+			// There are no images to process.
+			if len(res.Messages) == 0 {
+				return
+			}
+
+			for _, msg := range res.Messages {
+				var t task
+				if err := json.Unmarshal([]byte(*msg.Body), &t); err != nil {
+					log.Error(
+						"failed to unmarshal SQS message",
+						zap.String("body", *msg.Body),
+						zap.String("message-id", *msg.MessageId))
+					continue
+				}
+				t.messageID = *msg.MessageId
+				t.receiptHandle = *msg.ReceiptHandle
+
+				outputCh <- &t
+			}
+		}
+	}
+}
+
+func deleteMessage(
+	ctx context.Context,
+	entries []*sqs.DeleteMessageBatchRequestEntry,
+	tasks []*task,
+) {
+	res, err := sqsClient.DeleteMessageBatchWithContext(
+		ctx,
+		&sqs.DeleteMessageBatchInput{
+			QueueUrl: &config.SQSQueueURL,
+			Entries:  entries,
+		})
+	if err != nil {
+		log.Error("error while deleting messages", zap.Error(err))
+		return
+	}
+
+	for _, f := range res.Failed {
+		var level func(string, ...zapcore.Field)
+		if *f.SenderFault {
+			level = log.Error
+		} else {
+			level = log.Info
+		}
+
+		i, err := strconv.Atoi(*f.Id)
+		if err != nil || i < 0 || len(entries) <= i {
+			log.Error("unknown ID", zap.String("id", *f.Id))
+			continue
+		}
+
+		level("failed to delete message",
+			zap.String("code", *f.Code),
+			zap.String("message", *f.Message),
+			zap.Bool("sender-fault", *f.SenderFault),
+			zap.String("path", tasks[i].Path),
+		)
+	}
+}
+
+func deleter(ctx context.Context, inputCh <-chan *task) {
+	entries := make([]*sqs.DeleteMessageBatchRequestEntry, 0, 10)
+	tasks := make([]*task, 0, 10)
+
+	for {
+		select {
+		case <-ctx.Done():
+			if 0 < len(entries) {
+				log.Info("abandoned deletion",
+					zap.Error(ctx.Err()),
+					zap.Int("tasks", len(entries)))
+			}
+			return
+		case t, ok := <-inputCh:
+			if !ok {
+				if 0 < len(entries) {
+					deleteMessage(ctx, entries, tasks)
+				}
+				return
+			}
+
+			id := strconv.Itoa(len(entries))
+			entries = append(entries, &sqs.DeleteMessageBatchRequestEntry{
+				Id:            &id,
+				ReceiptHandle: &t.receiptHandle,
+			})
+			tasks = append(tasks, t)
+
+			if len(entries) == 10 {
+				deleteMessage(ctx, entries, tasks)
+				entries = entries[:0]
+				tasks = tasks[:0]
+			}
+		}
+	}
+}
+
+func retrieverFanIn(ctx context.Context, outputCh chan<- *task) {
+	inputCh := make(chan *task)
+	defer close(inputCh)
+	wg := &sync.WaitGroup{}
+	for i := 0; i < int(config.RetrieverCount); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			retriever(ctx, inputCh)
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		done <- struct{}{}
+	}()
+
+	for {
+		select {
+		case <-done:
+			break
+		case task := <-inputCh:
+			outputCh <- task
+		}
+	}
+
+}
+
+func workerFanOut(ctx context.Context, inputCh <-chan *task, outputCh chan<- *task) {
+	defer close(outputCh)
+
+	wg := &sync.WaitGroup{}
+	for i := 0; i < int(config.WorkerCount); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			worker(ctx, inputCh, outputCh)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func deleterFanOut(ctx context.Context, inputCh <-chan *task) {
+	wg := &sync.WaitGroup{}
+	for i := 0; i < int(config.DeleterCount); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			deleter(ctx, inputCh)
+		}()
+	}
+
+	wg.Wait()
+}
+
+// ConvertSQS converts image tasks retrieved from SQS.
+func ConvertSQS(ctx context.Context) {
+	inputCh := make(chan *task, int(config.WorkerCount)*10)
+	outputCh := make(chan *task, int(config.WorkerCount)*10)
+
+	go retrieverFanIn(ctx, inputCh)
+	go workerFanOut(ctx, inputCh, outputCh)
+	go deleterFanOut(ctx, outputCh)
 }
 
 // Convert converts an image at specified EFS path into WebP

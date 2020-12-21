@@ -21,8 +21,7 @@ func createLogger() *zap.Logger {
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "notifier"
-	app.Usage = "notify NFS file changes"
+	app.Name = "imgconv"
 
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{
@@ -48,7 +47,7 @@ func main() {
 		&cli.UintFlag{
 			Name:    "webp-quality",
 			Aliases: []string{"q"},
-			Value:   75,
+			Value:   90,
 		},
 	}
 
@@ -60,7 +59,6 @@ func main() {
 			Region:       c.String("region"),
 			S3Bucket:     c.String("s3-bucket"),
 			S3KeyBase:    c.String("s3-key-base"),
-			SQSQueueURL:  "",
 			EFSMountPath: c.String("efs-mount-path"),
 			WebPQuality:  uint8(c.Uint("webp-quality")),
 			Log:          log,
