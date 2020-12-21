@@ -1,11 +1,9 @@
 package main
 
 import (
-	"context"
+	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"strings"
 
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
 	"github.com/urfave/cli/v2"
@@ -27,59 +25,30 @@ func main() {
 	app.Usage = "notify NFS file changes"
 
 	app.Flags = []cli.Flag{
-		&cli.StringSliceFlag{
-			Name:    "excl-comm",
-			Aliases: []string{"ec"},
-			Value:   &cli.StringSlice{},
-			Usage:   "Command name to be excluded",
+		&cli.StringFlag{
+			Name:    "region",
+			Aliases: []string{"r"},
+			Value:   "ap-northeast-1",
 		},
-		&cli.StringSliceFlag{
-			Name:    "incl-fmode",
-			Aliases: []string{"im"},
-			Value:   &cli.StringSlice{},
-			Usage:   "File operation mode to be included. Possible values are: " + strings.Join(notify.AllFModes(), ", ") + ".",
+		&cli.StringFlag{
+			Name:     "s3-bucket",
+			Aliases:  []string{"b"},
+			Required: true,
 		},
-		&cli.StringSliceFlag{
-			Name:    "incl-fullname",
-			Aliases: []string{"in"},
-			Value:   &cli.StringSlice{},
-			Usage:   "Full file name to be included.",
+		&cli.StringFlag{
+			Name:     "s3-key-base",
+			Aliases:  []string{"k"},
+			Required: true,
 		},
-		&cli.StringSliceFlag{
-			Name:    "incl-ext",
-			Aliases: []string{"ie"},
-			Value:   &cli.StringSlice{},
-			Usage:   "File with specified extension to be included. Include leading dot.",
+		&cli.StringFlag{
+			Name:     "efs-mount-path",
+			Aliases:  []string{"m"},
+			Required: true,
 		},
-		&cli.StringSliceFlag{
-			Name:    "incl-mntpath",
-			Aliases: []string{"ir"},
-			Value:   &cli.StringSlice{},
-			Usage:   "Full path to the mount point where the file is located. Never include trailing slash.",
-		},
-		&cli.IntFlag{
-			Name:    "max-mnt-depth",
-			Aliases: []string{"md"},
-			Value:   16,
-			Usage:   "Maximum depth to scan for getting absolute mount point path. Increasing this value too much could cause compilation failure.",
-		},
-		&cli.IntFlag{
-			Name:    "max-dir-depth",
-			Aliases: []string{"dd"},
-			Value:   32,
-			Usage:   "Maximum depth to scan for getting absolute file path. Increasing this value too much could cause compilation failure.",
-		},
-		&cli.IntFlag{
-			Name:    "debug",
-			Aliases: []string{"d"},
-			Value:   0,
-			Usage:   "Enable debug output: bcc.DEBUG_SOURCE: 8, bcc.DEBUG_PREPROCESSOR: 4.",
-		},
-		&cli.BoolFlag{
-			Name:    "quit",
+		&cli.UintFlag{
+			Name:    "webp-quality",
 			Aliases: []string{"q"},
-			Value:   false,
-			Usage:   "Quit without tracing. This is mainly for debugging.",
+			Value:   75,
 		},
 	}
 
@@ -87,41 +56,23 @@ func main() {
 		log := createLogger()
 		defer log.Sync()
 
-		cfg := &notify.Config{
-			ExclComms:     c.StringSlice("excl-comm"),
-			InclFullNames: c.StringSlice("incl-fullname"),
-			InclExts:      c.StringSlice("incl-ext"),
-			InclMntPaths:  c.StringSlice("incl-mntpath"),
-			MaxMntDepth:   c.Int("max-mnt-depth"),
-			MaxDirDepth:   c.Int("max-dir-depth"),
-			BpfDebug:      c.Uint("debug"),
-			Quit:          c.Bool("quit"),
-			Log:           log,
+		cfg := &imgconv.Config{
+			Region:       c.String("region"),
+			S3Bucket:     c.String("s3-bucket"),
+			S3KeyBase:    c.String("s3-key-base"),
+			SQSQueueURL:  "",
+			EFSMountPath: c.String("efs-mount-path"),
+			WebPQuality:  uint8(c.Uint("webp-quality")),
+			Log:          log,
 		}
 
-		if err := cfg.SetModesFromString(c.StringSlice("incl-fmode")); err != nil {
-			log.Fatal("illegal incl-fmode parameter", zap.Error(err))
+		path := c.Args().Get(0)
+
+		imgconv.Init(cfg)
+
+		if !imgconv.Convert(path) {
+			return fmt.Errorf("failed to convert: %s", path)
 		}
-
-		eventCh := make(chan *notify.Event)
-		ctx, cancel := context.WithCancel(context.Background())
-
-		sig := make(chan os.Signal)
-		signal.Notify(sig, os.Interrupt, os.Kill)
-		go func() {
-			<-sig
-			cancel()
-		}()
-
-		go func() {
-			for {
-				if _, ok := <-eventCh; !ok {
-					return
-				}
-			}
-		}()
-
-		imgconv.Convert(cfg)
 
 		return nil
 	}
