@@ -48,6 +48,7 @@ type Config struct {
 	WorkerCount          uint8
 	RetrieverCount       uint8
 	DeleterCount         uint8
+	OrderStop            time.Duration
 	Log                  *zap.Logger
 }
 
@@ -113,7 +114,7 @@ func retriever(ctx context.Context, id string, outputCh chan<- *task) {
 	}
 	idField := zap.String("id", id)
 
-	log.Debug("receiver started", idField)
+	log.Debug("retriever started", idField)
 
 	for {
 		select {
@@ -133,7 +134,7 @@ func retriever(ctx context.Context, id string, outputCh chan<- *task) {
 				return
 			}
 
-			log.Debug("received count", idField, zap.Int("num", len(res.Messages)))
+			log.Debug("retrieved count", idField, zap.Int("num", len(res.Messages)))
 
 			for _, msg := range res.Messages {
 				var t task
@@ -148,7 +149,7 @@ func retriever(ctx context.Context, id string, outputCh chan<- *task) {
 				t.messageID = *msg.MessageId
 				t.receiptHandle = *msg.ReceiptHandle
 
-				log.Debug("received message",
+				log.Debug("retrieved message",
 					idField,
 					zap.String("path", t.Path),
 					zap.String("message-id", t.messageID))
@@ -220,13 +221,14 @@ func deleter(ctx context.Context, id string, inputCh <-chan *task) {
 			if !ok {
 				log.Debug("input closed", idField)
 				if 0 < len(entries) {
-					log.Debug("delete remaining messages", idField, zap.Int("num", len(tasks)))
+					log.Debug("delete remaining messages", idField, zap.Int("num", len(entries)))
 					deleteMessages(ctx, entries, tasks)
 				}
 				log.Debug("deleter done", idField)
 				return
 			}
 
+			log.Debug("got new task", idField, zap.String("path", t.Path))
 			id := strconv.Itoa(len(entries))
 			entries = append(entries, &sqs.DeleteMessageBatchRequestEntry{
 				Id:            &id,
@@ -235,6 +237,7 @@ func deleter(ctx context.Context, id string, inputCh <-chan *task) {
 			tasks = append(tasks, t)
 
 			if len(entries) == 10 {
+				log.Debug("buffer full; delete messages", idField, zap.Int("num", 10))
 				deleteMessages(ctx, entries, tasks)
 				entries = entries[:0]
 				tasks = tasks[:0]
@@ -246,30 +249,43 @@ func deleter(ctx context.Context, id string, inputCh <-chan *task) {
 func retrieverFanIn(ctx context.Context, outputCh chan<- *task) {
 	inputCh := make(chan *task)
 	defer close(inputCh)
+
+	retrievedIDs := make(map[string]struct{})
 	wg := &sync.WaitGroup{}
 	for i := 0; i < int(config.RetrieverCount); i++ {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
 			retriever(ctx, id, inputCh)
-		}("recv" + strconv.Itoa(i))
+		}("retr" + strconv.Itoa(i))
 	}
 
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
+		log.Debug("all retrievers have finished")
 		done <- struct{}{}
 	}()
 
 	for {
 		select {
 		case <-done:
+			log.Debug("retrieving part done")
 			break
 		case task := <-inputCh:
+			if _, ok := retrievedIDs[task.messageID]; ok {
+				log.Debug("duplicate message found",
+					zap.String("path", task.Path),
+					zap.String("message-id", task.messageID))
+			} else {
+				retrievedIDs[task.messageID] = struct{}{}
+			}
+			// Never ignore duplicate messages since only the most recent one can
+			// be used to delete it from queue.
+			// https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_DeleteMessage.html
 			outputCh <- task
 		}
 	}
-
 }
 
 func workerFanOut(ctx context.Context, inputCh <-chan *task, outputCh chan<- *task) {
@@ -285,6 +301,7 @@ func workerFanOut(ctx context.Context, inputCh <-chan *task, outputCh chan<- *ta
 	}
 
 	wg.Wait()
+	log.Debug("worker part done")
 }
 
 func deleterFanOut(ctx context.Context, inputCh <-chan *task) {
@@ -298,10 +315,26 @@ func deleterFanOut(ctx context.Context, inputCh <-chan *task) {
 	}
 
 	wg.Wait()
+	log.Debug("deleter part done")
 }
 
-// ConvertSQS converts image tasks retrieved from SQS.
-func ConvertSQS(ctx context.Context) {
+// ConvertSQSLambda converts image tasks retrieved from SQS.
+func ConvertSQSLambda(ctx context.Context) {
+	getTaskCh := make(chan *task, int(config.WorkerCount)*10)
+	deleteTaskCh := make(chan *task, int(config.WorkerCount)*10)
+
+	// Stop message retrieval before timeout occurs.
+	retrCtx := ctx
+	if t, ok := ctx.Deadline(); ok {
+		retrCtx, _ = context.WithDeadline(ctx, t.Add(-config.OrderStop))
+	}
+	go retrieverFanIn(retrCtx, getTaskCh)
+	go workerFanOut(ctx, getTaskCh, deleteTaskCh)
+	deleterFanOut(ctx, deleteTaskCh)
+}
+
+// ConvertSQSCLI converts image tasks retrieved from SQS.
+func ConvertSQSCLI(ctx context.Context) {
 	getTaskCh := make(chan *task, int(config.WorkerCount)*10)
 	deleteTaskCh := make(chan *task, int(config.WorkerCount)*10)
 
@@ -385,8 +418,11 @@ func Convert(path string) bool {
 			Body:        webP,
 			Bucket:      &config.S3Bucket,
 			ContentType: &contentType,
-			Metadata:    map[string]*string{"Original-Path": &path, "Original-Timestamp": &timestamp},
 			Key:         &s3key,
+			Metadata: map[string]*string{
+				"Original-Path":      &path,
+				"Original-Timestamp": &timestamp,
+			},
 		}); err != nil {
 			log.Error("unable to upload to S3", zapPathField, zap.Error(err))
 			uploadedCh <- nil
