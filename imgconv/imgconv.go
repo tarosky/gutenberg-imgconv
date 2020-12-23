@@ -75,22 +75,35 @@ type task struct {
 	receiptHandle string
 }
 
-func worker(ctx context.Context, inputCh <-chan *task, outputCh chan<- *task) {
+func worker(ctx context.Context, id string, inputCh <-chan *task, outputCh chan<- *task) {
+	idField := zap.String("id", id)
+
+	log.Debug("worker started", idField)
+
 	for {
 		select {
 		case <-ctx.Done():
+			log.Debug("done by ctx", idField)
 			return
 		case t, ok := <-inputCh:
 			if !ok {
+				log.Debug("input closed; done", idField)
 				return
 			}
+			log.Debug("received task",
+				idField,
+				zap.String("path", t.Path),
+				zap.String("message-id", t.messageID))
 			t.succeeded = Convert(t.Path)
+			log.Debug("conversion finished",
+				idField,
+				zap.Bool("succeeded", t.succeeded))
 			outputCh <- t
 		}
 	}
 }
 
-func retriever(ctx context.Context, outputCh chan<- *task) {
+func retriever(ctx context.Context, id string, outputCh chan<- *task) {
 	ten := int64(10)
 	vt := int64(config.SQSVisibilityTimeout)
 	sqsInput := &sqs.ReceiveMessageInput{
@@ -98,28 +111,36 @@ func retriever(ctx context.Context, outputCh chan<- *task) {
 		MaxNumberOfMessages: &ten,
 		VisibilityTimeout:   &vt,
 	}
+	idField := zap.String("id", id)
+
+	log.Debug("receiver started", idField)
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Debug("done by ctx", idField)
 			return
 		default:
 			res, err := sqsClient.ReceiveMessageWithContext(ctx, sqsInput)
 			if err != nil {
-				log.Error("failed to receive SQS message", zap.Error(err))
+				log.Error("failed to receive SQS message", idField, zap.Error(err))
 				continue
 			}
 
 			// There are no images to process.
 			if len(res.Messages) == 0 {
+				log.Debug("no messages found; done", idField)
 				return
 			}
+
+			log.Debug("received count", idField, zap.Int("num", len(res.Messages)))
 
 			for _, msg := range res.Messages {
 				var t task
 				if err := json.Unmarshal([]byte(*msg.Body), &t); err != nil {
 					log.Error(
 						"failed to unmarshal SQS message",
+						idField,
 						zap.String("body", *msg.Body),
 						zap.String("message-id", *msg.MessageId))
 					continue
@@ -127,13 +148,18 @@ func retriever(ctx context.Context, outputCh chan<- *task) {
 				t.messageID = *msg.MessageId
 				t.receiptHandle = *msg.ReceiptHandle
 
+				log.Debug("received message",
+					idField,
+					zap.String("path", t.Path),
+					zap.String("message-id", t.messageID))
+
 				outputCh <- &t
 			}
 		}
 	}
 }
 
-func deleteMessage(
+func deleteMessages(
 	ctx context.Context,
 	entries []*sqs.DeleteMessageBatchRequestEntry,
 	tasks []*task,
@@ -172,24 +198,32 @@ func deleteMessage(
 	}
 }
 
-func deleter(ctx context.Context, inputCh <-chan *task) {
+func deleter(ctx context.Context, id string, inputCh <-chan *task) {
 	entries := make([]*sqs.DeleteMessageBatchRequestEntry, 0, 10)
 	tasks := make([]*task, 0, 10)
+	idField := zap.String("id", id)
+
+	log.Debug("deleter started", idField)
 
 	for {
 		select {
 		case <-ctx.Done():
 			if 0 < len(entries) {
 				log.Info("abandoned deletion",
+					idField,
 					zap.Error(ctx.Err()),
 					zap.Int("tasks", len(entries)))
+				log.Debug("done by ctx", idField)
 			}
 			return
 		case t, ok := <-inputCh:
 			if !ok {
+				log.Debug("input closed", idField)
 				if 0 < len(entries) {
-					deleteMessage(ctx, entries, tasks)
+					log.Debug("delete remaining messages", idField, zap.Int("num", len(tasks)))
+					deleteMessages(ctx, entries, tasks)
 				}
+				log.Debug("deleter done", idField)
 				return
 			}
 
@@ -201,7 +235,7 @@ func deleter(ctx context.Context, inputCh <-chan *task) {
 			tasks = append(tasks, t)
 
 			if len(entries) == 10 {
-				deleteMessage(ctx, entries, tasks)
+				deleteMessages(ctx, entries, tasks)
 				entries = entries[:0]
 				tasks = tasks[:0]
 			}
@@ -215,10 +249,10 @@ func retrieverFanIn(ctx context.Context, outputCh chan<- *task) {
 	wg := &sync.WaitGroup{}
 	for i := 0; i < int(config.RetrieverCount); i++ {
 		wg.Add(1)
-		go func() {
+		go func(id string) {
 			defer wg.Done()
-			retriever(ctx, inputCh)
-		}()
+			retriever(ctx, id, inputCh)
+		}("recv" + strconv.Itoa(i))
 	}
 
 	done := make(chan struct{})
@@ -244,10 +278,10 @@ func workerFanOut(ctx context.Context, inputCh <-chan *task, outputCh chan<- *ta
 	wg := &sync.WaitGroup{}
 	for i := 0; i < int(config.WorkerCount); i++ {
 		wg.Add(1)
-		go func() {
+		go func(id string) {
 			defer wg.Done()
-			worker(ctx, inputCh, outputCh)
-		}()
+			worker(ctx, id, inputCh, outputCh)
+		}("worker" + strconv.Itoa(i))
 	}
 
 	wg.Wait()
@@ -257,10 +291,10 @@ func deleterFanOut(ctx context.Context, inputCh <-chan *task) {
 	wg := &sync.WaitGroup{}
 	for i := 0; i < int(config.DeleterCount); i++ {
 		wg.Add(1)
-		go func() {
+		go func(id string) {
 			defer wg.Done()
-			deleter(ctx, inputCh)
-		}()
+			deleter(ctx, id, inputCh)
+		}("del" + strconv.Itoa(i))
 	}
 
 	wg.Wait()
@@ -268,12 +302,12 @@ func deleterFanOut(ctx context.Context, inputCh <-chan *task) {
 
 // ConvertSQS converts image tasks retrieved from SQS.
 func ConvertSQS(ctx context.Context) {
-	inputCh := make(chan *task, int(config.WorkerCount)*10)
-	outputCh := make(chan *task, int(config.WorkerCount)*10)
+	getTaskCh := make(chan *task, int(config.WorkerCount)*10)
+	deleteTaskCh := make(chan *task, int(config.WorkerCount)*10)
 
-	go retrieverFanIn(ctx, inputCh)
-	go workerFanOut(ctx, inputCh, outputCh)
-	go deleterFanOut(ctx, outputCh)
+	go retrieverFanIn(ctx, getTaskCh)
+	go workerFanOut(ctx, getTaskCh, deleteTaskCh)
+	deleterFanOut(ctx, deleteTaskCh)
 }
 
 // Convert converts an image at specified EFS path into WebP
