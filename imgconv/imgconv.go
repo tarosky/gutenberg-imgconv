@@ -53,11 +53,34 @@ type Config struct {
 	Log                  *zap.Logger
 }
 
-func createLogger() *zap.Logger {
-	log, err := zap.NewDevelopment(zap.WithCaller(false))
+// CreateLogger creates and returns a new logger.
+func CreateLogger() *zap.Logger {
+	config := &zap.Config{
+		Level:            zap.NewAtomicLevelAt(zap.DebugLevel),
+		Development:      true,
+		Encoding:         "json",
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+		EncoderConfig: zapcore.EncoderConfig{
+			TimeKey:        "time",
+			LevelKey:       "level",
+			NameKey:        zapcore.OmitKey,
+			CallerKey:      zapcore.OmitKey,
+			FunctionKey:    zapcore.OmitKey,
+			MessageKey:     "message",
+			StacktraceKey:  zapcore.OmitKey,
+			LineEnding:     zapcore.DefaultLineEnding,
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
+			EncodeTime:     zapcore.ISO8601TimeEncoder,
+			EncodeDuration: zapcore.StringDurationEncoder,
+			EncodeCaller:   zapcore.ShortCallerEncoder,
+		},
+	}
+	log, err := config.Build(zap.WithCaller(false))
 	if err != nil {
 		panic("failed to initialize logger")
 	}
+
 	return log
 }
 
@@ -77,7 +100,12 @@ type task struct {
 	receiptHandle string
 }
 
-func worker(ctx context.Context, id string, inputCh <-chan *task, outputCh chan<- *task) {
+func worker(
+	ctx context.Context,
+	id string,
+	retrieverHubToWorkersCh <-chan *task,
+	outputCh chan<- *task,
+) {
 	idField := zap.String("id", id)
 
 	log.Debug("worker started", idField)
@@ -87,9 +115,9 @@ func worker(ctx context.Context, id string, inputCh <-chan *task, outputCh chan<
 		case <-ctx.Done():
 			log.Debug("done by ctx", idField)
 			return
-		case t, ok := <-inputCh:
+		case t, ok := <-retrieverHubToWorkersCh:
 			if !ok {
-				log.Debug("input closed; done", idField)
+				log.Debug("input closed; worker done", idField)
 				return
 			}
 			log.Debug("received task",
@@ -131,7 +159,7 @@ func retriever(ctx context.Context, id string, outputCh chan<- *task) {
 
 			// There are no images to process.
 			if len(res.Messages) == 0 {
-				log.Debug("no messages found; done", idField)
+				log.Debug("no messages found; retriever done", idField)
 				return
 			}
 
@@ -200,7 +228,7 @@ func deleteMessages(
 	}
 }
 
-func deleter(ctx context.Context, id string, inputCh <-chan *task) {
+func deleter(ctx context.Context, id string, workersToDeletersCh <-chan *task) {
 	entries := make([]*sqs.DeleteMessageBatchRequestEntry, 0, 10)
 	tasks := make([]*task, 0, 10)
 	idField := zap.String("id", id)
@@ -218,7 +246,7 @@ func deleter(ctx context.Context, id string, inputCh <-chan *task) {
 				log.Debug("done by ctx", idField)
 			}
 			return
-		case t, ok := <-inputCh:
+		case t, ok := <-workersToDeletersCh:
 			if !ok {
 				log.Debug("input closed", idField)
 				if 0 < len(entries) {
@@ -247,9 +275,10 @@ func deleter(ctx context.Context, id string, inputCh <-chan *task) {
 	}
 }
 
-func retrieverFanIn(ctx context.Context, outputCh chan<- *task) {
-	inputCh := make(chan *task)
-	defer close(inputCh)
+func retrieverFanIn(ctx context.Context, retrieverHubToWorkersCh chan<- *task) {
+	retrieversToHubCh := make(chan *task)
+	defer close(retrieverHubToWorkersCh)
+	defer close(retrieversToHubCh)
 
 	retrievedIDs := make(map[string]struct{})
 	wg := &sync.WaitGroup{}
@@ -257,7 +286,7 @@ func retrieverFanIn(ctx context.Context, outputCh chan<- *task) {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			retriever(ctx, id, inputCh)
+			retriever(ctx, id, retrieversToHubCh)
 		}("retr" + strconv.Itoa(i))
 	}
 
@@ -272,8 +301,8 @@ func retrieverFanIn(ctx context.Context, outputCh chan<- *task) {
 		select {
 		case <-done:
 			log.Debug("retrieving part done")
-			break
-		case task := <-inputCh:
+			return
+		case task := <-retrieversToHubCh:
 			if _, ok := retrievedIDs[task.messageID]; ok {
 				log.Debug("duplicate message found",
 					zap.String("path", task.Path),
@@ -284,20 +313,24 @@ func retrieverFanIn(ctx context.Context, outputCh chan<- *task) {
 			// Never ignore duplicate messages since only the most recent one can
 			// be used to delete it from queue.
 			// https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_DeleteMessage.html
-			outputCh <- task
+			retrieverHubToWorkersCh <- task
 		}
 	}
 }
 
-func workerFanOut(ctx context.Context, inputCh <-chan *task, outputCh chan<- *task) {
-	defer close(outputCh)
+func workerFanOut(
+	ctx context.Context,
+	retrieverHubToWorkersCh <-chan *task,
+	workersToDeletersCh chan<- *task,
+) {
+	defer close(workersToDeletersCh)
 
 	wg := &sync.WaitGroup{}
 	for i := 0; i < int(config.WorkerCount); i++ {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			worker(ctx, id, inputCh, outputCh)
+			worker(ctx, id, retrieverHubToWorkersCh, workersToDeletersCh)
 		}("worker" + strconv.Itoa(i))
 	}
 
@@ -305,13 +338,13 @@ func workerFanOut(ctx context.Context, inputCh <-chan *task, outputCh chan<- *ta
 	log.Debug("worker part done")
 }
 
-func deleterFanOut(ctx context.Context, inputCh <-chan *task) {
+func deleterFanOut(ctx context.Context, workersToDeletersCh <-chan *task) {
 	wg := &sync.WaitGroup{}
 	for i := 0; i < int(config.DeleterCount); i++ {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			deleter(ctx, id, inputCh)
+			deleter(ctx, id, workersToDeletersCh)
 		}("del" + strconv.Itoa(i))
 	}
 
@@ -321,9 +354,6 @@ func deleterFanOut(ctx context.Context, inputCh <-chan *task) {
 
 // ConvertSQSLambda converts image tasks retrieved from SQS.
 func ConvertSQSLambda(ctx context.Context) {
-	getTaskCh := make(chan *task, int(config.WorkerCount)*10)
-	deleteTaskCh := make(chan *task, int(config.WorkerCount)*10)
-
 	// Stop message retrieval before timeout occurs.
 	retrCtx := ctx
 	var cancel context.CancelFunc
@@ -332,19 +362,22 @@ func ConvertSQSLambda(ctx context.Context) {
 	}
 	defer cancel()
 
-	go retrieverFanIn(retrCtx, getTaskCh)
-	go workerFanOut(ctx, getTaskCh, deleteTaskCh)
-	deleterFanOut(ctx, deleteTaskCh)
+	retrieverHubToWorkersCh := make(chan *task, int(config.WorkerCount)*10)
+	workersToDeletersCh := make(chan *task, int(config.WorkerCount)*10)
+
+	go retrieverFanIn(retrCtx, retrieverHubToWorkersCh)
+	go workerFanOut(ctx, retrieverHubToWorkersCh, workersToDeletersCh)
+	deleterFanOut(ctx, workersToDeletersCh)
 }
 
 // ConvertSQSCLI converts image tasks retrieved from SQS.
 func ConvertSQSCLI(ctx context.Context) {
-	getTaskCh := make(chan *task, int(config.WorkerCount)*10)
-	deleteTaskCh := make(chan *task, int(config.WorkerCount)*10)
+	retrieverHubToWorkersCh := make(chan *task, int(config.WorkerCount)*10)
+	workersToDeletersCh := make(chan *task, int(config.WorkerCount)*10)
 
-	go retrieverFanIn(ctx, getTaskCh)
-	go workerFanOut(ctx, getTaskCh, deleteTaskCh)
-	deleterFanOut(ctx, deleteTaskCh)
+	go retrieverFanIn(ctx, retrieverHubToWorkersCh)
+	go workerFanOut(ctx, retrieverHubToWorkersCh, workersToDeletersCh)
+	deleterFanOut(ctx, workersToDeletersCh)
 }
 
 // Convert converts an image at specified EFS path into WebP

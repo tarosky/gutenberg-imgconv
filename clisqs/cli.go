@@ -9,10 +9,32 @@ import (
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func createLogger() *zap.Logger {
-	log, err := zap.NewDevelopment(zap.WithCaller(false))
+	config := &zap.Config{
+		Level:            zap.NewAtomicLevelAt(zap.DebugLevel),
+		Development:      true,
+		Encoding:         "json",
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+		EncoderConfig: zapcore.EncoderConfig{
+			TimeKey:        "time",
+			LevelKey:       "level",
+			NameKey:        zapcore.OmitKey,
+			CallerKey:      zapcore.OmitKey,
+			FunctionKey:    zapcore.OmitKey,
+			MessageKey:     "message",
+			StacktraceKey:  zapcore.OmitKey,
+			LineEnding:     zapcore.DefaultLineEnding,
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
+			EncodeTime:     zapcore.ISO8601TimeEncoder,
+			EncodeDuration: zapcore.StringDurationEncoder,
+			EncodeCaller:   zapcore.ShortCallerEncoder,
+		},
+	}
+	log, err := config.Build(zap.WithCaller(false))
 	if err != nil {
 		panic("failed to initialize logger")
 	}
@@ -63,12 +85,12 @@ func main() {
 		&cli.UintFlag{
 			Name:    "webp-quality",
 			Aliases: []string{"q"},
-			Value:   90,
+			Value:   80,
 		},
 		&cli.UintFlag{
 			Name:    "retriever-count",
 			Aliases: []string{"rc"},
-			Value:   3,
+			Value:   1,
 		},
 		&cli.UintFlag{
 			Name:    "worker-count",
@@ -78,12 +100,12 @@ func main() {
 		&cli.UintFlag{
 			Name:    "deleter-count",
 			Aliases: []string{"dc"},
-			Value:   3,
+			Value:   2,
 		},
 	}
 
 	app.Action = func(c *cli.Context) error {
-		log := createLogger()
+		log := imgconv.CreateLogger()
 		defer log.Sync()
 
 		fsize, err := units.ParseStrictBytes(c.String("max-file-size"))

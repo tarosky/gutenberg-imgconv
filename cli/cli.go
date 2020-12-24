@@ -53,12 +53,12 @@ func main() {
 		&cli.UintFlag{
 			Name:    "webp-quality",
 			Aliases: []string{"q"},
-			Value:   90,
+			Value:   80,
 		},
 	}
 
 	app.Action = func(c *cli.Context) error {
-		log := createLogger()
+		log := imgconv.CreateLogger()
 		defer log.Sync()
 
 		fsize, err := units.ParseStrictBytes(c.String("max-file-size"))
