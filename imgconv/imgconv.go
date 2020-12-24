@@ -44,6 +44,7 @@ type Config struct {
 	SQSQueueURL          string
 	SQSVisibilityTimeout uint
 	EFSMountPath         string
+	MaxFileSize          int64
 	WebPQuality          uint8
 	WorkerCount          uint8
 	RetrieverCount       uint8
@@ -325,9 +326,12 @@ func ConvertSQSLambda(ctx context.Context) {
 
 	// Stop message retrieval before timeout occurs.
 	retrCtx := ctx
+	var cancel context.CancelFunc
 	if t, ok := ctx.Deadline(); ok {
-		retrCtx, _ = context.WithDeadline(ctx, t.Add(-config.OrderStop))
+		retrCtx, cancel = context.WithDeadline(ctx, t.Add(-config.OrderStop))
 	}
+	defer cancel()
+
 	go retrieverFanIn(retrCtx, getTaskCh)
 	go workerFanOut(ctx, getTaskCh, deleteTaskCh)
 	deleterFanOut(ctx, deleteTaskCh)
@@ -359,6 +363,15 @@ func Convert(path string) bool {
 				return
 			}
 			log.Error("failed to stat file", zapPathField, zap.Error(err))
+			statCh <- nil
+			return
+		}
+
+		if config.MaxFileSize < stat.Size() {
+			log.Warn("file is larger than predefined limit",
+				zapPathField,
+				zap.Int64("size", stat.Size()),
+				zap.Int64("max-file-size", config.MaxFileSize))
 			statCh <- nil
 			return
 		}

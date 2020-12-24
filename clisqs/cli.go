@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 
+	"github.com/alecthomas/units"
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
@@ -53,6 +55,11 @@ func main() {
 			Aliases:  []string{"m"},
 			Required: true,
 		},
+		&cli.StringFlag{
+			Name:    "max-file-size",
+			Aliases: []string{"s"},
+			Value:   "20MiB",
+		},
 		&cli.UintFlag{
 			Name:    "webp-quality",
 			Aliases: []string{"q"},
@@ -79,12 +86,20 @@ func main() {
 		log := createLogger()
 		defer log.Sync()
 
+		fsize, err := units.ParseStrictBytes(c.String("max-file-size"))
+		if err != nil {
+			return fmt.Errorf(
+				"failed to parse max-file-size value: %s", c.String("max-file-size"))
+		}
+
 		cfg := &imgconv.Config{
 			Region:               c.String("region"),
 			S3Bucket:             c.String("s3-bucket"),
 			S3KeyBase:            c.String("s3-key-base"),
 			SQSQueueURL:          c.String("sqs-queue-url"),
 			SQSVisibilityTimeout: c.Uint("sqs-vilibility-timeout"),
+			EFSMountPath:         c.String("efs-mount-path"),
+			MaxFileSize:          fsize,
 			WebPQuality:          uint8(c.Uint("webp-quality")),
 			RetrieverCount:       uint8(c.Uint("retriever-count")),
 			WorkerCount:          uint8(c.Uint("worker-count")),
@@ -93,7 +108,7 @@ func main() {
 		}
 
 		imgconv.Init(cfg)
-		imgconv.ConvertSQS(c.Context)
+		imgconv.ConvertSQSCLI(c.Context)
 
 		return nil
 	}
