@@ -33,7 +33,9 @@ func HandleRequest(ctx context.Context, task Task) error {
 		return fmt.Errorf("image conversion failed")
 	}
 
-	imgconv.ConvertSQSCLI(ctx)
+	imgconv.ConvertSQSLambda(ctx)
+
+	return nil
 }
 
 func getEnv(key, fallback string) string {
