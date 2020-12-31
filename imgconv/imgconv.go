@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/chai2010/webp"
@@ -27,6 +29,7 @@ import (
 var (
 	awsSession       *session.Session
 	s3UploaderClient *s3manager.Uploader
+	s3Client         *s3.S3
 	sqsClient        *sqs.SQS
 	config           *Config
 	log              *zap.Logger
@@ -89,6 +92,7 @@ func Init(cfg *Config) {
 	log = cfg.Log
 	awsSession = session.Must(session.NewSession(&aws.Config{Region: &cfg.Region}))
 	s3UploaderClient = s3manager.NewUploader(awsSession)
+	s3Client = s3.New(awsSession)
 	sqsClient = sqs.New(awsSession)
 	config = cfg
 }
@@ -124,10 +128,17 @@ func worker(
 				idField,
 				zap.String("path", t.Path),
 				zap.String("message-id", t.messageID))
-			t.succeeded = Convert(t.Path)
-			log.Debug("conversion finished",
-				idField,
-				zap.Bool("succeeded", t.succeeded))
+			if err := Convert(ctx, t.Path); err != nil {
+				// Error level message is output in Convert function
+				log.Debug("conversion finished",
+					idField,
+					zap.Bool("succeeded", false),
+					zap.Error(err))
+			} else {
+				log.Debug("conversion finished",
+					idField,
+					zap.Bool("succeeded", true))
+			}
 			outputCh <- t
 		}
 	}
@@ -380,23 +391,27 @@ func ConvertSQSCLI(ctx context.Context) {
 	deleterFanOut(ctx, workersToDeletersCh)
 }
 
-// Convert converts an image at specified EFS path into WebP
-func Convert(path string) bool {
-	zapPathField := zap.String("path", path)
+type fileInfo struct {
+	info os.FileInfo
+	err  error
+}
 
-	efsPath := config.EFSMountPath + "/" + path
-	statCh := make(chan os.FileInfo)
-	go func() {
+// Convert converts an image at specified EFS path into WebP
+func Convert(ctx context.Context, path string) error {
+	zapPathField := zap.String("path", path)
+	efsPath := filepath.Join(config.EFSMountPath, path)
+
+	srcStat := func(statCh chan *fileInfo) {
 		defer close(statCh)
 		stat, err := os.Stat(efsPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				log.Warn("cannot convert: base image file not found", zapPathField)
-				statCh <- nil
+				// Non-existent file is the norm
+				statCh <- &fileInfo{nil, nil}
 				return
 			}
 			log.Error("failed to stat file", zapPathField, zap.Error(err))
-			statCh <- nil
+			statCh <- &fileInfo{nil, err}
 			return
 		}
 
@@ -405,62 +420,63 @@ func Convert(path string) bool {
 				zapPathField,
 				zap.Int64("size", stat.Size()),
 				zap.Int64("max-file-size", config.MaxFileSize))
-			statCh <- nil
+			statCh <- &fileInfo{nil, err}
 			return
 		}
-		statCh <- stat
-	}()
 
-	fileCh := make(chan *os.File)
-	go func() {
-		defer close(fileCh)
+		statCh <- &fileInfo{stat, nil}
+	}
+
+	srcFile := func() (*os.File, error) {
 		f, err := os.Open(efsPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				log.Warn("cannot convert: base image file not found", zapPathField)
-				fileCh <- nil
-				return
+				return nil, nil
 			}
 			log.Error("failed to open file", zapPathField, zap.Error(err))
-			fileCh <- nil
-			return
+			return nil, err
 		}
-		fileCh <- f
-	}()
-
-	file := <-fileCh
-	if file == nil {
-		return false
+		return f, nil
 	}
-	webPCh := make(chan *bytes.Buffer)
-	go func() {
-		defer close(webPCh)
+
+	encodeToWebP := func(file *os.File) (*bytes.Buffer, error) {
+		// Non-existent file
+		if file == nil {
+			return nil, nil
+		}
+
 		img, _, err := image.Decode(file)
 		if err != nil {
 			log.Error("failed to decode image", zapPathField, zap.Error(err))
-			webPCh <- nil
-			return
+			return nil, err
 		}
 
 		var buf bytes.Buffer
 		webp.Encode(&buf, img, &webp.Options{Quality: float32(config.WebPQuality)})
-		webPCh <- &buf
-	}()
-
-	stat := <-statCh
-	webP := <-webPCh
-	if stat == nil || webP == nil {
-		return false
+		return &buf, nil
 	}
-	uploadedCh := make(chan *struct{})
-	go func() {
-		defer close(uploadedCh)
-		timestamp := stat.ModTime().UTC().Format(time.RFC3339)
+
+	uploadToS3 := func(ctx context.Context, stat os.FileInfo, webP *bytes.Buffer) error {
+		s3key := filepath.Join(config.S3KeyBase, path+".webp")
+
+		if stat == nil {
+			if _, err := s3Client.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
+				Bucket: &config.S3Bucket,
+				Key:    &s3key,
+			}); err != nil {
+				log.Error("unable to delete S3 object", zapPathField, zap.Error(err))
+				return err
+			}
+
+			log.Info("deleted removed file", zapPathField)
+			return nil
+		}
+
+		timestamp := stat.ModTime().UTC().Format(time.RFC3339Nano)
 		contentType := webPContentType
-		s3key := config.S3KeyBase + "/" + path + ".webp"
 		beforeSize := stat.Size()
 		afterSize := webP.Len()
-		if _, err := s3UploaderClient.Upload(&s3manager.UploadInput{
+		if _, err := s3UploaderClient.UploadWithContext(ctx, &s3manager.UploadInput{
 			Body:        webP,
 			Bucket:      &config.S3Bucket,
 			ContentType: &contentType,
@@ -471,14 +487,33 @@ func Convert(path string) bool {
 			},
 		}); err != nil {
 			log.Error("unable to upload to S3", zapPathField, zap.Error(err))
-			uploadedCh <- nil
-			return
+			return err
 		}
 
-		log.Info("converted", zapPathField,
-			zap.Int("before", int(beforeSize)), zap.Int("after", int(afterSize)))
-		uploadedCh <- &struct{}{}
-	}()
+		log.Info("converted",
+			zapPathField,
+			zap.Int("before", int(beforeSize)),
+			zap.Int("after", int(afterSize)))
+		return nil
+	}
 
-	return <-uploadedCh != nil
+	statCh := make(chan *fileInfo)
+	go srcStat(statCh)
+
+	file, err := srcFile()
+	if err != nil {
+		return err
+	}
+
+	webP, err := encodeToWebP(file)
+	if err != nil {
+		return err
+	}
+
+	stat := <-statCh
+	if stat.err != nil {
+		return err
+	}
+
+	return uploadToS3(ctx, stat.info, webP)
 }

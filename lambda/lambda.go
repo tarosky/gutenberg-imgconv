@@ -27,10 +27,10 @@ var (
 // HandleRequest handles requests from Lambda environment.
 func HandleRequest(ctx context.Context, task Task) error {
 	if task.Path != "" {
-		if imgconv.Convert(task.Path) {
-			return nil
+		if err := imgconv.Convert(ctx, task.Path); err != nil {
+			return fmt.Errorf("image conversion failed")
 		}
-		return fmt.Errorf("image conversion failed")
+		return nil
 	}
 
 	imgconv.ConvertSQSLambda(ctx)
@@ -49,7 +49,7 @@ func getEnvUint(key string, fallback uint) uint {
 	if value, ok := os.LookupEnv(key); ok {
 		v, err := strconv.ParseUint(value, 10, 32)
 		if err != nil {
-			log.Fatal("illegal argument", zap.String("val", key))
+			log.Panic("illegal argument", zap.String("val", key))
 		}
 		return uint(v)
 	}
@@ -64,7 +64,7 @@ func getEnvFileSize(key string, fallback string) int64 {
 
 	fsize, err := units.ParseStrictBytes(value)
 	if err != nil {
-		log.Fatal("failed to parse file size value", zap.String("value", value))
+		log.Panic("failed to parse file size value", zap.String("value", value))
 	}
 
 	return fsize
@@ -74,7 +74,7 @@ func getEnvUint8(key string, fallback uint8) uint8 {
 	if value, ok := os.LookupEnv(key); ok {
 		v, err := strconv.ParseUint(value, 10, 8)
 		if err != nil {
-			log.Fatal("illegal argument", zap.String("val", key))
+			log.Panic("illegal argument", zap.String("val", key))
 		}
 		return uint8(v)
 	}
@@ -89,7 +89,7 @@ func getEnvDuration(key string, fallback string) time.Duration {
 
 	dur, err := time.ParseDuration(value)
 	if err != nil {
-		log.Fatal("failed to parse duration value", zap.String("value", value))
+		log.Panic("failed to parse duration value", zap.String("value", value))
 	}
 
 	return dur

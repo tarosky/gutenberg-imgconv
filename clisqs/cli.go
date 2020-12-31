@@ -137,6 +137,6 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Fatal("failed to run app", zap.Error(err))
+		log.Panic("failed to run app", zap.Error(err))
 	}
 }

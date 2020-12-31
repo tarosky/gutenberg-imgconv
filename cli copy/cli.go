@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 
-	"github.com/alecthomas/units"
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
@@ -45,34 +44,22 @@ func main() {
 			Aliases:  []string{"m"},
 			Required: true,
 		},
-		&cli.StringFlag{
-			Name:    "max-file-size",
-			Aliases: []string{"s"},
-			Value:   "20MiB",
-		},
 		&cli.UintFlag{
 			Name:    "webp-quality",
 			Aliases: []string{"q"},
-			Value:   80,
+			Value:   90,
 		},
 	}
 
 	app.Action = func(c *cli.Context) error {
-		log := imgconv.CreateLogger()
+		log := createLogger()
 		defer log.Sync()
-
-		fsize, err := units.ParseStrictBytes(c.String("max-file-size"))
-		if err != nil {
-			return fmt.Errorf(
-				"failed to parse max-file-size value: %s", c.String("max-file-size"))
-		}
 
 		cfg := &imgconv.Config{
 			Region:       c.String("region"),
 			S3Bucket:     c.String("s3-bucket"),
 			S3KeyBase:    c.String("s3-key-base"),
 			EFSMountPath: c.String("efs-mount-path"),
-			MaxFileSize:  fsize,
 			WebPQuality:  uint8(c.Uint("webp-quality")),
 			Log:          log,
 		}
@@ -90,6 +77,6 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Panic("failed to run app", zap.Error(err))
+		log.Fatal("failed to run app", zap.Error(err))
 	}
 }
