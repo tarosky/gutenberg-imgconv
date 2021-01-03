@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/alecthomas/units"
@@ -79,9 +78,9 @@ func main() {
 
 		path := c.Args().Get(0)
 
-		imgconv.Init(cfg)
+		env := imgconv.NewEnvironment(cfg)
 
-		if err := imgconv.Convert(c.Context, path); err != nil {
+		if err := env.Convert(c.Context, path); err != nil {
 			return fmt.Errorf("failed to convert: %s", path)
 		}
 
@@ -90,6 +89,6 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Panic("failed to run app", zap.Error(err))
+		panic("failed to run app: " + err.Error())
 	}
 }

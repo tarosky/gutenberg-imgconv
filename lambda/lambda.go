@@ -10,7 +10,6 @@ import (
 	"github.com/alecthomas/units"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
-	"go.uber.org/zap"
 )
 
 // Task is used to convert specific image directly.
@@ -19,21 +18,18 @@ type Task struct {
 	Path string `json:"path"`
 }
 
-var (
-	config *imgconv.Config
-	log    *zap.Logger
-)
+var env *imgconv.Environment
 
 // HandleRequest handles requests from Lambda environment.
 func HandleRequest(ctx context.Context, task Task) error {
 	if task.Path != "" {
-		if err := imgconv.Convert(ctx, task.Path); err != nil {
+		if err := env.Convert(ctx, task.Path); err != nil {
 			return fmt.Errorf("image conversion failed")
 		}
 		return nil
 	}
 
-	imgconv.ConvertSQSLambda(ctx)
+	env.ConvertSQSLambda(ctx)
 
 	return nil
 }
@@ -49,7 +45,7 @@ func getEnvUint(key string, fallback uint) uint {
 	if value, ok := os.LookupEnv(key); ok {
 		v, err := strconv.ParseUint(value, 10, 32)
 		if err != nil {
-			log.Panic("illegal argument", zap.String("val", key))
+			panic("illegal argument: " + key)
 		}
 		return uint(v)
 	}
@@ -64,7 +60,7 @@ func getEnvFileSize(key string, fallback string) int64 {
 
 	fsize, err := units.ParseStrictBytes(value)
 	if err != nil {
-		log.Panic("failed to parse file size value", zap.String("value", value))
+		panic("failed to parse file size value: " + value)
 	}
 
 	return fsize
@@ -74,7 +70,7 @@ func getEnvUint8(key string, fallback uint8) uint8 {
 	if value, ok := os.LookupEnv(key); ok {
 		v, err := strconv.ParseUint(value, 10, 8)
 		if err != nil {
-			log.Panic("illegal argument", zap.String("val", key))
+			panic("illegal argument: " + key)
 		}
 		return uint8(v)
 	}
@@ -89,16 +85,14 @@ func getEnvDuration(key string, fallback string) time.Duration {
 
 	dur, err := time.ParseDuration(value)
 	if err != nil {
-		log.Panic("failed to parse duration value", zap.String("value", value))
+		panic("failed to parse duration value: " + value)
 	}
 
 	return dur
 }
 
 func main() {
-	log = imgconv.CreateLogger()
-
-	config = &imgconv.Config{
+	env = imgconv.NewEnvironment(&imgconv.Config{
 		Region:               os.Getenv("REGION"),
 		S3Bucket:             os.Getenv("S3_BUCKET"),
 		S3KeyBase:            os.Getenv("S3_KEY_BASE"),
@@ -111,8 +105,8 @@ func main() {
 		RetrieverCount:       getEnvUint8("RETRIEVER_COUNT", 2),
 		DeleterCount:         getEnvUint8("DELETER_COUNT", 2),
 		OrderStop:            getEnvDuration("ORDER_STOP", "30s"),
-		Log:                  log,
-	}
+		Log:                  imgconv.CreateLogger(),
+	})
 
 	lambda.Start(HandleRequest)
 }

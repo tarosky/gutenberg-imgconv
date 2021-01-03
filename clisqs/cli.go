@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/alecthomas/units"
@@ -129,14 +128,14 @@ func main() {
 			Log:                  log,
 		}
 
-		imgconv.Init(cfg)
-		imgconv.ConvertSQSCLI(c.Context)
+		env := imgconv.NewEnvironment(cfg)
+		env.ConvertSQSCLI(c.Context)
 
 		return nil
 	}
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Panic("failed to run app", zap.Error(err))
+		panic("failed to run app: " + err.Error())
 	}
 }
