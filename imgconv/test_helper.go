@@ -74,7 +74,7 @@ func getTestConfig(name string) *Config {
 		S3Bucket:             readTestConfig("s3-bucket"),
 		S3KeyBase:            generateSafeRandomString() + "/" + name,
 		SQSQueueURL:          sqsURL,
-		SQSVisibilityTimeout: 60,
+		SQSVisibilityTimeout: 2,
 		EFSMountPath:         efsPath,
 		MaxFileSize:          10 * 1024 * 1024,
 		WebPQuality:          80,
