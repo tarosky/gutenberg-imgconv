@@ -107,7 +107,7 @@ func (s *ConvertSQSSuite) getObjectKeySet() map[string]struct{} {
 }
 
 func (s *ConvertSQSSuite) SetupTest() {
-	s.env = newTestEnvironment(s.TestSuite)
+	s.env = newTestEnvironment("imgconv", s.TestSuite)
 	s.Require().NoError(os.MkdirAll(s.env.EFSMountPath+"/dir", 0755))
 }
 
@@ -116,7 +116,7 @@ func (s *ConvertSQSSuite) TearDownTest() {
 }
 
 func TestConvertSQSSuite(t *testing.T) {
-	s := &ConvertSQSSuite{TestSuite: initTestSuite(t)}
+	s := &ConvertSQSSuite{TestSuite: initTestSuite("imgconv", t)}
 	suite.Run(t, s)
 }
 

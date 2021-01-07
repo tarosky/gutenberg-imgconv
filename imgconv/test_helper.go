@@ -91,8 +91,8 @@ func getTestSQSQueueNameFromURL(url string) string {
 	return parts[len(parts)-1]
 }
 
-func newTestEnvironment(s *TestSuite) *Environment {
-	e := NewEnvironment(getTestConfig("convert"))
+func newTestEnvironment(name string, s *TestSuite) *Environment {
+	e := NewEnvironment(getTestConfig(name))
 
 	sqsName := getTestSQSQueueNameFromURL(e.SQSQueueURL)
 
@@ -114,9 +114,9 @@ func newTestEnvironment(s *TestSuite) *Environment {
 	return e
 }
 
-func initTestSuite(t require.TestingT) *TestSuite {
+func initTestSuite(name string, t require.TestingT) *TestSuite {
 	InitTest()
-	require.NoError(t, os.RemoveAll("work/test/convert"), "failed to remove directory")
+	require.NoError(t, os.RemoveAll("work/test/"+name), "failed to remove directory")
 	ctx := context.Background()
 
 	return &TestSuite{ctx: ctx}
@@ -140,11 +140,15 @@ type TestSuite struct {
 func copy(src, dst string, s *suite.Suite) {
 	in, err := os.Open(src)
 	s.Require().NoError(err)
-	defer in.Close()
+	defer func() {
+		s.Require().NoError(in.Close())
+	}()
 
 	out, err := os.Create(dst)
 	s.Require().NoError(err)
-	defer out.Close()
+	defer func() {
+		s.Require().NoError(out.Close())
+	}()
 
 	{
 		_, err := io.Copy(out, in)

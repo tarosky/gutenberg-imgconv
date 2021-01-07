@@ -16,7 +16,7 @@ type ConvertSuite struct {
 }
 
 func (s *ConvertSuite) SetupTest() {
-	s.env = newTestEnvironment(s.TestSuite)
+	s.env = newTestEnvironment("convert", s.TestSuite)
 
 	s.Require().NoError(os.MkdirAll(s.env.EFSMountPath+"/dir", 0755))
 
@@ -29,7 +29,7 @@ func (s *ConvertSuite) TearDownTest() {
 }
 
 func TestConvertSuite(t *testing.T) {
-	s := &ConvertSuite{TestSuite: initTestSuite(t)}
+	s := &ConvertSuite{TestSuite: initTestSuite("convert", t)}
 	suite.Run(t, s)
 }
 
@@ -40,7 +40,9 @@ func (s *ConvertSuite) assertS3ObjectExists(path string) {
 		Key:    &key,
 	})
 	s.Assert().NoError(err)
-	defer res.Body.Close()
+	defer func() {
+		s.Require().NoError(res.Body.Close())
+	}()
 
 	head := make([]byte, 512)
 	{

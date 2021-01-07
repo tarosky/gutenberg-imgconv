@@ -136,6 +136,13 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	if file != nil {
+		defer func() {
+			if err := file.Close(); err != nil {
+				e.log.Error("failed to close EFS file", zapPathField, zap.Error(err))
+			}
+		}()
+	}
 
 	webP, err := encodeToWebP(file)
 	if err != nil {
