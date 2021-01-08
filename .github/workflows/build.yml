@@ -65,6 +65,14 @@ jobs:
         release_name: Build ${{env.BUILD_NUMBER}}
         draft: false
         prerelease: false
+    - uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      with:
+        upload_url: ${{steps.create_release.outputs.upload_url}}
+        asset_path: ./imgconv
+        asset_name: imgconv.build-${{env.BUILD_NUMBER}}-linux-amd64
+        asset_content_type: application/octet-stream
     - uses: aws-actions/configure-aws-credentials@v1
       with:
         aws-access-key-id: AKIAQGFE5ESVPYTGC33F
