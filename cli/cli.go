@@ -35,13 +35,13 @@ func main() {
 			Required: true,
 		},
 		&cli.StringFlag{
-			Name:     "s3-key-base",
-			Aliases:  []string{"k"},
+			Name:     "s3-dest-key-base",
+			Aliases:  []string{"dk"},
 			Required: true,
 		},
 		&cli.StringFlag{
-			Name:     "efs-mount-path",
-			Aliases:  []string{"m"},
+			Name:     "s3-src-key-base",
+			Aliases:  []string{"sk"},
 			Required: true,
 		},
 		&cli.StringFlag{
@@ -67,13 +67,13 @@ func main() {
 		}
 
 		cfg := &imgconv.Config{
-			Region:       c.String("region"),
-			S3Bucket:     c.String("s3-bucket"),
-			S3KeyBase:    c.String("s3-key-base"),
-			EFSMountPath: c.String("efs-mount-path"),
-			MaxFileSize:  fsize,
-			WebPQuality:  uint8(c.Uint("webp-quality")),
-			Log:          log,
+			Region:        c.String("region"),
+			S3Bucket:      c.String("s3-bucket"),
+			S3DestKeyBase: c.String("s3-dest-key-base"),
+			S3SrcKeyBase:  c.String("s3-src-key-base"),
+			MaxFileSize:   fsize,
+			WebPQuality:   uint8(c.Uint("webp-quality")),
+			Log:           log,
 		}
 
 		path := c.Args().Get(0)

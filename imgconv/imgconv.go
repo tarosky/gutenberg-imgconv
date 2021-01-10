@@ -11,7 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -23,10 +22,10 @@ type Config struct {
 	AccessKeyID          string
 	SecretAccessKey      string
 	S3Bucket             string
-	S3KeyBase            string
+	S3SrcKeyBase         string
+	S3DestKeyBase        string
 	SQSQueueURL          string
 	SQSVisibilityTimeout uint
-	EFSMountPath         string
 	MaxFileSize          int64
 	WebPQuality          uint8
 	WorkerCount          uint8
@@ -39,11 +38,10 @@ type Config struct {
 // Environment holds values needed to execute the entire program.
 type Environment struct {
 	Config
-	AWSSession       *session.Session
-	S3UploaderClient *s3manager.Uploader
-	S3Client         *s3.S3
-	SQSClient        *sqs.SQS
-	log              *zap.Logger
+	AWSSession *session.Session
+	S3Client   *s3.S3
+	SQSClient  *sqs.SQS
+	log        *zap.Logger
 }
 
 // CreateLogger creates and returns a new logger.
@@ -90,12 +88,11 @@ func createAWSSession(cfg *Config) *session.Session {
 func NewEnvironment(cfg *Config) *Environment {
 	awsSession := createAWSSession(cfg)
 	return &Environment{
-		Config:           *cfg,
-		AWSSession:       awsSession,
-		S3UploaderClient: s3manager.NewUploader(awsSession),
-		S3Client:         s3.New(awsSession),
-		SQSClient:        sqs.New(awsSession),
-		log:              cfg.Log,
+		Config:     *cfg,
+		AWSSession: awsSession,
+		S3Client:   s3.New(awsSession),
+		SQSClient:  sqs.New(awsSession),
+		log:        cfg.Log,
 	}
 }
 

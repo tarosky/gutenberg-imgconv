@@ -57,8 +57,13 @@ func main() {
 			Required: true,
 		},
 		&cli.StringFlag{
-			Name:     "s3-key-base",
-			Aliases:  []string{"k"},
+			Name:     "s3-src-key-base",
+			Aliases:  []string{"sk"},
+			Required: true,
+		},
+		&cli.StringFlag{
+			Name:     "s3-dest-key-base",
+			Aliases:  []string{"dk"},
 			Required: true,
 		},
 		&cli.StringFlag{
@@ -70,11 +75,6 @@ func main() {
 			Name:    "sqs-vilibility-timeout",
 			Aliases: []string{"t"},
 			Value:   60,
-		},
-		&cli.StringFlag{
-			Name:     "efs-mount-path",
-			Aliases:  []string{"m"},
-			Required: true,
 		},
 		&cli.StringFlag{
 			Name:    "max-file-size",
@@ -116,10 +116,10 @@ func main() {
 		cfg := &imgconv.Config{
 			Region:               c.String("region"),
 			S3Bucket:             c.String("s3-bucket"),
-			S3KeyBase:            c.String("s3-key-base"),
+			S3SrcKeyBase:         c.String("s3-src-key-base"),
+			S3DestKeyBase:        c.String("s3-dest-key-base"),
 			SQSQueueURL:          c.String("sqs-queue-url"),
 			SQSVisibilityTimeout: c.Uint("sqs-vilibility-timeout"),
-			EFSMountPath:         c.String("efs-mount-path"),
 			MaxFileSize:          fsize,
 			WebPQuality:          uint8(c.Uint("webp-quality")),
 			RetrieverCount:       uint8(c.Uint("retriever-count")),

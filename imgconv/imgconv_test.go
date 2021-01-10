@@ -1,9 +1,9 @@
 package imgconv
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/stretchr/testify/suite"
+	"golang.org/x/sync/errgroup"
 )
 
 type ConvertSQSSuite struct {
@@ -59,36 +60,69 @@ func (s *ConvertSQSSuite) isSQSEmpty() bool {
 	return 0 == len(res.Messages)
 }
 
-func (s *ConvertSQSSuite) setupImages(jpgCount, pngCount int) {
-	sqsEntries := make([]*sqs.SendMessageBatchRequestEntry, 0, jpgCount+pngCount)
+func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount int) {
+	entryCh := make(chan *sqs.SendMessageBatchRequestEntry)
+	entriesCh := make(chan []*sqs.SendMessageBatchRequestEntry)
+	eg, ctx := errgroup.WithContext(ctx)
+
+	go func() {
+		sqsEntries := make([]*sqs.SendMessageBatchRequestEntry, 0, jpgCount+pngCount)
+		defer func() {
+			entriesCh <- sqsEntries
+			close(entriesCh)
+		}()
+
+		for {
+			select {
+			case e, ok := <-entryCh:
+				if !ok {
+					return
+				}
+				sqsEntries = append(sqsEntries, e)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	for i := 0; i < jpgCount; i++ {
-		path := fmt.Sprintf("dir/image%03d.jpg", i)
-		copy(sampleJPEG, s.env.EFSMountPath+"/"+path, &s.Suite)
-		jb, err := json.Marshal(&task{Path: path})
-		s.Require().NoError(err)
-		mb := string(jb)
-		id := "jpg-" + strconv.Itoa(i)
-		sqsEntries = append(sqsEntries, &sqs.SendMessageBatchRequestEntry{
-			Id:          &id,
-			MessageBody: &mb,
+		i := i
+		eg.Go(func() error {
+			path := fmt.Sprintf("dir/image%03d.jpg", i)
+			copy(ctx, sampleJPEG, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
+			jb, err := json.Marshal(&task{Path: path})
+			s.Require().NoError(err)
+			mb := string(jb)
+			id := "jpg-" + strconv.Itoa(i)
+			entryCh <- &sqs.SendMessageBatchRequestEntry{
+				Id:          &id,
+				MessageBody: &mb,
+			}
+			return nil
 		})
 	}
 
 	for i := 0; i < pngCount; i++ {
-		path := fmt.Sprintf("dir/image%03d.png", i)
-		copy(samplePNG, s.env.EFSMountPath+"/"+path, &s.Suite)
-		jb, err := json.Marshal(&task{Path: path})
-		s.Require().NoError(err)
-		mb := string(jb)
-		id := "png-" + strconv.Itoa(i)
-		sqsEntries = append(sqsEntries, &sqs.SendMessageBatchRequestEntry{
-			Id:          &id,
-			MessageBody: &mb,
+		i := i
+		eg.Go(func() error {
+			path := fmt.Sprintf("dir/image%03d.png", i)
+			copy(ctx, samplePNG, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
+			jb, err := json.Marshal(&task{Path: path})
+			s.Require().NoError(err)
+			mb := string(jb)
+			id := "png-" + strconv.Itoa(i)
+			entryCh <- &sqs.SendMessageBatchRequestEntry{
+				Id:          &id,
+				MessageBody: &mb,
+			}
+			return nil
 		})
 	}
 
-	s.sendSQSMessages(sqsEntries)
+	s.Require().NoError(eg.Wait())
+	close(entryCh)
+	entries := <-entriesCh
+	s.sendSQSMessages(entries)
 }
 
 func (s *ConvertSQSSuite) getObjectKeySet() map[string]struct{} {
@@ -96,7 +130,7 @@ func (s *ConvertSQSSuite) getObjectKeySet() map[string]struct{} {
 
 	res, err := s.env.S3Client.ListObjectsV2WithContext(s.ctx, &s3.ListObjectsV2Input{
 		Bucket: &s.env.S3Bucket,
-		Prefix: &s.env.S3KeyBase,
+		Prefix: &s.env.S3DestKeyBase,
 	})
 	s.Require().NoError(err)
 	for _, c := range res.Contents {
@@ -108,7 +142,6 @@ func (s *ConvertSQSSuite) getObjectKeySet() map[string]struct{} {
 
 func (s *ConvertSQSSuite) SetupTest() {
 	s.env = newTestEnvironment("imgconv", s.TestSuite)
-	s.Require().NoError(os.MkdirAll(s.env.EFSMountPath+"/dir", 0755))
 }
 
 func (s *ConvertSQSSuite) TearDownTest() {
@@ -121,35 +154,35 @@ func TestConvertSQSSuite(t *testing.T) {
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS0() {
-	s.setupImages(0, 0)
+	s.setupImages(s.ctx, 0, 0)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 0)
 	s.Assert().True(s.isSQSEmpty())
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS1() {
-	s.setupImages(1, 0)
+	s.setupImages(s.ctx, 1, 0)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 1)
 	s.Assert().True(s.isSQSEmpty())
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS2() {
-	s.setupImages(1, 1)
+	s.setupImages(s.ctx, 1, 1)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 2)
 	s.Assert().True(s.isSQSEmpty())
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS10() {
-	s.setupImages(5, 5)
+	s.setupImages(s.ctx, 5, 5)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 10)
 	s.Assert().True(s.isSQSEmpty())
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS200() {
-	s.setupImages(100, 100)
+	s.setupImages(s.ctx, 100, 100)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 200)
 	s.Assert().True(s.isSQSEmpty())
