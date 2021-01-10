@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -65,17 +65,17 @@ func getTestConfig(name string) *Config {
 		region,
 		readTestConfig("aws-account-id"),
 		sqsName)
-	efsPath := fmt.Sprintf("work/test/%s/%s", name, generateSafeRandomString())
+	s3SrcPath := fmt.Sprintf("work/test/%s/%s", name, generateSafeRandomString())
 
 	return &Config{
 		Region:               region,
 		AccessKeyID:          readTestConfig("access-key-id"),
 		SecretAccessKey:      readTestConfig("secret-access-key"),
 		S3Bucket:             readTestConfig("s3-bucket"),
-		S3KeyBase:            generateSafeRandomString() + "/" + name,
+		S3SrcKeyBase:         s3SrcPath,
+		S3DestKeyBase:        generateSafeRandomString() + "/" + name,
 		SQSQueueURL:          sqsURL,
 		SQSVisibilityTimeout: 2,
-		EFSMountPath:         efsPath,
 		MaxFileSize:          10 * 1024 * 1024,
 		WebPQuality:          80,
 		WorkerCount:          3,
@@ -100,16 +100,6 @@ func newTestEnvironment(name string, s *TestSuite) *Environment {
 		QueueName: &sqsName,
 	})
 	require.NoError(s.T(), err, "failed to create SQS queue")
-
-	require.NoError(
-		s.T(),
-		os.RemoveAll(e.EFSMountPath),
-		"failed to remove directory")
-
-	require.NoError(
-		s.T(),
-		os.MkdirAll(e.EFSMountPath, 0755),
-		"failed to create directory")
 
 	return e
 }
@@ -137,21 +127,28 @@ type TestSuite struct {
 	ctx context.Context
 }
 
-func copy(src, dst string, s *suite.Suite) {
+func copy(ctx context.Context, src, dst string, s *TestSuite) {
 	in, err := os.Open(src)
 	s.Require().NoError(err)
 	defer func() {
 		s.Require().NoError(in.Close())
 	}()
 
-	out, err := os.Create(dst)
+	info, err := in.Stat()
 	s.Require().NoError(err)
-	defer func() {
-		s.Require().NoError(out.Close())
-	}()
+
+	timestamp := info.ModTime().UTC().Format(time.RFC3339Nano)
 
 	{
-		_, err := io.Copy(out, in)
+		_, err := s.env.S3Client.PutObjectWithContext(ctx, &s3.PutObjectInput{
+			Bucket: &s.env.S3Bucket,
+			Key:    &dst,
+			Body:   in,
+			Metadata: map[string]*string{
+				pathMetadata:      &src,
+				timestampMetadata: &timestamp,
+			},
+		})
 		s.Require().NoError(err)
 	}
 }

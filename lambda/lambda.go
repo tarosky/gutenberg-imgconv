@@ -95,10 +95,10 @@ func main() {
 	env = imgconv.NewEnvironment(&imgconv.Config{
 		Region:               os.Getenv("AWS_REGION"),
 		S3Bucket:             os.Getenv("S3_BUCKET"),
-		S3KeyBase:            os.Getenv("S3_KEY_BASE"),
+		S3SrcKeyBase:         os.Getenv("S3_SRC_KEY_BASE"),
+		S3DestKeyBase:        os.Getenv("S3_DEST_KEY_BASE"),
 		SQSQueueURL:          os.Getenv("SQS_QUEUE_URL"),
 		SQSVisibilityTimeout: getEnvUint("SQS_VISIBILITY_TIMEOUT", 300),
-		EFSMountPath:         os.Getenv("EFS_MOUNT_PATH"),
 		MaxFileSize:          getEnvFileSize("MAX_FILE_SIZE", "100MiB"),
 		WebPQuality:          getEnvUint8("WEBP_QUALITY", 80),
 		WorkerCount:          getEnvUint8("WORKER_COUNT", 10),
