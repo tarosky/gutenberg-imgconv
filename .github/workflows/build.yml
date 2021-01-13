@@ -3,10 +3,10 @@ name: CI
 on:
   pull_request:
     branches:
-    - main
+    - master
   push:
     branches:
-    - main
+    - master
     - issue/*
     - dev/harai
 
@@ -40,7 +40,7 @@ jobs:
 
   release:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-20.04
     env:
       BUCKET_NAME: gutenberg-modrepo-modulerepobucket-99uoevgdqlvw
