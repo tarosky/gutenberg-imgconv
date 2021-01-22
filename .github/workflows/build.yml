@@ -33,10 +33,14 @@ jobs:
         github_token: ${{secrets.GITHUB_TOKEN}}
         files: work/report.xml
     - run: go build -o work/imgconv lambda/lambda.go
+      env:
+        GOOS: linux
+        CGO_ENABLED: 0
+    - run: zip work/imgconv.zip work/imgconv
     - uses: actions/upload-artifact@v2
       with:
         name: artifact
-        path: work/imgconv
+        path: work/imgconv.zip
 
   release:
     needs: build
@@ -69,12 +73,12 @@ jobs:
         GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
       with:
         upload_url: ${{steps.create_release.outputs.upload_url}}
-        asset_path: ./imgconv
-        asset_name: imgconv.build-${{env.BUILD_NUMBER}}-linux-amd64
+        asset_path: ./imgconv.zip
+        asset_name: imgconv.build-${{env.BUILD_NUMBER}}-linux-amd64.zip
         asset_content_type: application/octet-stream
     - uses: aws-actions/configure-aws-credentials@v1
       with:
         aws-access-key-id: AKIAQGFE5ESVPYTGC33F
         aws-secret-access-key: ${{secrets.AWS_SECRET_ACCESS_KEY}}
         aws-region: ap-northeast-1
-    - run: aws s3 cp ./imgconv s3://${{env.BUCKET_NAME}}/imgconv/imgconv.build-${{env.BUILD_NUMBER}}-linux-amd64
+    - run: aws s3 cp ./imgconv.zip s3://${{env.BUCKET_NAME}}/imgconv/imgconv.build-${{env.BUILD_NUMBER}}-linux-amd64.zip
