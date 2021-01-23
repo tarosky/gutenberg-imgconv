@@ -34,7 +34,7 @@ jobs:
         github_token: ${{secrets.GITHUB_TOKEN}}
         files: work/report.xml
     - run: docker container run --rm --entrypoint /bin/bash --mount type=bind,source="$(pwd)",target=/workspace amazonlinux:1 -c 'yum install -y golang gcc && cd /workspace && GOOS=linux go build -o work/imgconv lambda/lambda.go'
-    - run: zip work/imgconv.zip work/imgconv
+    - run: zip -j work/imgconv.zip work/imgconv
     - uses: actions/upload-artifact@v2
       with:
         name: artifact
