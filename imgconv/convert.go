@@ -109,12 +109,14 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		}
 
 		contentType := webPContentType
+		storage := s3.StorageClassStandardIa
 		afterSize := webP.Len()
 		if _, err := e.S3Client.PutObject(&s3.PutObjectInput{
-			Body:        bytes.NewReader(webP.Bytes()),
-			Bucket:      &e.S3Bucket,
-			ContentType: &contentType,
-			Key:         &s3key,
+			Body:         bytes.NewReader(webP.Bytes()),
+			Bucket:       &e.S3Bucket,
+			ContentType:  &contentType,
+			Key:          &s3key,
+			StorageClass: &storage,
 			Metadata: map[string]*string{
 				pathMetadata:      &path,
 				timestampMetadata: timestamp,

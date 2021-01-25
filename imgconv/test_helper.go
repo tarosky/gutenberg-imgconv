@@ -140,10 +140,12 @@ func copy(ctx context.Context, src, dst string, s *TestSuite) {
 	timestamp := info.ModTime().UTC().Format(time.RFC3339Nano)
 
 	{
+		storage := s3.StorageClassStandardIa
 		_, err := s.env.S3Client.PutObjectWithContext(ctx, &s3.PutObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &dst,
-			Body:   in,
+			Bucket:       &s.env.S3Bucket,
+			Key:          &dst,
+			Body:         in,
+			StorageClass: &storage,
 			Metadata: map[string]*string{
 				pathMetadata:      &src,
 				timestampMetadata: &timestamp,
