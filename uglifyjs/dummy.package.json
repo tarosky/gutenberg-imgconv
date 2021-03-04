@@ -1,0 +1,13 @@
+{
+  "name": "dummy",
+  "version": "1.0.0",
+  "description": "dummy",
+  "main": "index.js",
+  "scripts": {
+    "test": "exit 1"
+  },
+  "repository": "tarosky/dummy",
+  "keywords": [],
+  "author": "dummy",
+  "license": "ISC"
+}

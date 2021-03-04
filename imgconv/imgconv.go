@@ -3,15 +3,21 @@ package imgconv
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/tdewolff/minify/v2"
+	"github.com/tdewolff/minify/v2/css"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -21,6 +27,7 @@ type Config struct {
 	Region               string
 	AccessKeyID          string
 	SecretAccessKey      string
+	BaseURL              string
 	S3Bucket             string
 	S3SrcKeyBase         string
 	S3DestKeyBase        string
@@ -32,16 +39,18 @@ type Config struct {
 	RetrieverCount       uint8
 	DeleterCount         uint8
 	OrderStop            time.Duration
+	UglifyJSPath         string
 	Log                  *zap.Logger
 }
 
 // Environment holds values needed to execute the entire program.
 type Environment struct {
 	Config
-	AWSSession *session.Session
-	S3Client   *s3.S3
-	SQSClient  *sqs.SQS
-	log        *zap.Logger
+	AWSConfig *aws.Config
+	S3Client  *s3.Client
+	SQSClient *sqs.Client
+	minifyCSS func(w io.Writer, r io.Reader, params map[string]string) error
+	log       *zap.Logger
 }
 
 // CreateLogger creates and returns a new logger.
@@ -75,24 +84,53 @@ func CreateLogger() *zap.Logger {
 	return log
 }
 
-func createAWSSession(cfg *Config) *session.Session {
-	c := &aws.Config{Region: &cfg.Region}
+func createAWSConfig(ctx context.Context, cfg *Config) *aws.Config {
+	awsCfg, err := config.LoadDefaultConfig(
+		ctx,
+		config.WithRegion(cfg.Region))
+	if err != nil {
+		panic(err)
+	}
+
+	// awsCfg.Retryer = retry.NewStandard()
+
 	if cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" {
-		c.Credentials = credentials.NewStaticCredentials(
+		awsCfg.Credentials = credentials.NewStaticCredentialsProvider(
 			cfg.AccessKeyID, cfg.SecretAccessKey, "")
 	}
-	return session.Must(session.NewSession(c))
+	return &awsCfg
+}
+
+func uglifyJSPath(path string) string {
+	if path == "" {
+		ex, err := os.Executable()
+		if err != nil {
+			panic(err)
+		}
+		return filepath.Dir(ex) + "/uglifyjs"
+	}
+	p, err := filepath.Abs(path)
+	if err != nil {
+		panic(err)
+	}
+	return p
 }
 
 // NewEnvironment initializes values needed for execution.
-func NewEnvironment(cfg *Config) *Environment {
-	awsSession := createAWSSession(cfg)
+func NewEnvironment(ctx context.Context, cfg *Config) *Environment {
+	awsConfig := createAWSConfig(ctx, cfg)
+	cfg.UglifyJSPath = uglifyJSPath(cfg.UglifyJSPath)
+	minifier := minify.New()
+	minifyCSS := func(w io.Writer, r io.Reader, params map[string]string) error {
+		return (&css.Minifier{}).Minify(minifier, w, r, params)
+	}
 	return &Environment{
-		Config:     *cfg,
-		AWSSession: awsSession,
-		S3Client:   s3.New(awsSession),
-		SQSClient:  sqs.New(awsSession),
-		log:        cfg.Log,
+		Config:    *cfg,
+		AWSConfig: awsConfig,
+		S3Client:  s3.NewFromConfig(*awsConfig),
+		SQSClient: sqs.NewFromConfig(*awsConfig),
+		minifyCSS: minifyCSS,
+		log:       cfg.Log,
 	}
 }
 
@@ -144,12 +182,10 @@ func (e *Environment) worker(
 }
 
 func (e *Environment) retriever(ctx context.Context, id string, outputCh chan<- *task) {
-	ten := int64(10)
-	vt := int64(e.SQSVisibilityTimeout)
 	sqsInput := &sqs.ReceiveMessageInput{
 		QueueUrl:            &e.SQSQueueURL,
-		MaxNumberOfMessages: &ten,
-		VisibilityTimeout:   &vt,
+		MaxNumberOfMessages: 10,
+		VisibilityTimeout:   int32(e.SQSVisibilityTimeout),
 	}
 	idField := zap.String("id", id)
 
@@ -161,7 +197,7 @@ func (e *Environment) retriever(ctx context.Context, id string, outputCh chan<- 
 			e.log.Debug("done by ctx", idField)
 			return
 		default:
-			res, err := e.SQSClient.ReceiveMessageWithContext(ctx, sqsInput)
+			res, err := e.SQSClient.ReceiveMessage(ctx, sqsInput)
 			if err != nil {
 				e.log.Error("failed to receive SQS message", idField, zap.Error(err))
 				continue
@@ -201,10 +237,10 @@ func (e *Environment) retriever(ctx context.Context, id string, outputCh chan<- 
 
 func (e *Environment) deleteMessages(
 	ctx context.Context,
-	entries []*sqs.DeleteMessageBatchRequestEntry,
+	entries []types.DeleteMessageBatchRequestEntry,
 	tasks []*task,
 ) {
-	res, err := e.SQSClient.DeleteMessageBatchWithContext(
+	res, err := e.SQSClient.DeleteMessageBatch(
 		ctx,
 		&sqs.DeleteMessageBatchInput{
 			QueueUrl: &e.SQSQueueURL,
@@ -217,7 +253,7 @@ func (e *Environment) deleteMessages(
 
 	for _, f := range res.Failed {
 		var level func(string, ...zapcore.Field)
-		if *f.SenderFault {
+		if f.SenderFault {
 			level = e.log.Error
 		} else {
 			level = e.log.Info
@@ -232,14 +268,14 @@ func (e *Environment) deleteMessages(
 		level("failed to delete message",
 			zap.String("code", *f.Code),
 			zap.String("message", *f.Message),
-			zap.Bool("sender-fault", *f.SenderFault),
+			zap.Bool("sender-fault", f.SenderFault),
 			zap.String("path", tasks[i].Path),
 		)
 	}
 }
 
 func (e *Environment) deleter(ctx context.Context, id string, workersToDeletersCh <-chan *task) {
-	entries := make([]*sqs.DeleteMessageBatchRequestEntry, 0, 10)
+	entries := make([]types.DeleteMessageBatchRequestEntry, 0, 10)
 	tasks := make([]*task, 0, 10)
 	idField := zap.String("id", id)
 
@@ -269,7 +305,7 @@ func (e *Environment) deleter(ctx context.Context, id string, workersToDeletersC
 
 			e.log.Debug("got new task", idField, zap.String("path", t.Path))
 			id := strconv.Itoa(len(entries))
-			entries = append(entries, &sqs.DeleteMessageBatchRequestEntry{
+			entries = append(entries, types.DeleteMessageBatchRequestEntry{
 				Id:            &id,
 				ReceiptHandle: &t.receiptHandle,
 			})

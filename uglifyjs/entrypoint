@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -eu
+
+export HOME=/ephemeral
+
+package="$1"
+version="$2"
+exec_name="$3"
+output_dir="$4"
+
+npm install "$package@$version" --no-cache
+exec nexe "node_modules/$package/bin/$exec_name" -o "$output_dir" -r "node_modules/$package/**"

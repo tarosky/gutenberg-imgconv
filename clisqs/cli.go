@@ -115,6 +115,7 @@ func main() {
 
 		cfg := &imgconv.Config{
 			Region:               c.String("region"),
+			BaseURL:              c.String("base-url"),
 			S3Bucket:             c.String("s3-bucket"),
 			S3SrcKeyBase:         c.String("s3-src-key-base"),
 			S3DestKeyBase:        c.String("s3-dest-key-base"),
@@ -128,7 +129,7 @@ func main() {
 			Log:                  log,
 		}
 
-		env := imgconv.NewEnvironment(cfg)
+		env := imgconv.NewEnvironment(c.Context, cfg)
 		env.ConvertSQSCLI(c.Context)
 
 		return nil

@@ -8,19 +8,61 @@ on:
     branches:
     - master
     - issue/*
-    - dev/harai
+    # - dev/harai
+
+env:
+  ACCESS_KEY_ID: AKIAQGFE5ESVOYCL2ANC
+  AWS_ACCOUNT_ID: '013230744746'
+  S3_BUCKET: gutenberg-modrepo-testbucket-66i59vgigq34
+  GO_VERSION: 1.15.8
 
 jobs:
-  build:
+  build-go:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
     - uses: actions/setup-go@v2
       with:
-        go-version: '^1.15.0'
-    - run: echo AKIAQGFE5ESVOYCL2ANC > config/test/access-key-id
-    - run: echo 013230744746 > config/test/aws-account-id
-    - run: echo gutenberg-modrepo-testbucket-66i59vgigq34 > config/test/s3-bucket
+        go-version: '^${{env.GO_VERSION}}'
+    - run: echo "$ACCESS_KEY_ID" > config/test/access-key-id
+    - run: echo "$AWS_ACCOUNT_ID" > config/test/aws-account-id
+    - run: echo "$S3_BUCKET" > config/test/s3-bucket
+    - run: echo "$TEST_AWS_SECRET_ACCESS_KEY" > config/test/secret-access-key
+      env:
+        TEST_AWS_SECRET_ACCESS_KEY: ${{secrets.TEST_AWS_SECRET_ACCESS_KEY}}
+    - run: docker container run --rm --entrypoint /bin/bash --mount type=bind,source="$(pwd)",target=/workspace amazonlinux:1 -c 'yum install -y golang gcc && cd /workspace && GOOS=linux go build -o work/imgconv lambda/lambda.go'
+    - uses: actions/upload-artifact@v2
+      with:
+        name: artifact
+        path: work/imgconv
+
+  build-uglifyjs:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - run: uglifyjs/build-image
+    - run: uglifyjs/run-nexe
+    - uses: actions/upload-artifact@v2
+      with:
+        name: artifact
+        path: work/uglifyjs
+
+  test:
+    needs: build-uglifyjs
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/download-artifact@v2
+      with:
+        name: artifact
+        path: work
+    - run: chmod +x work/uglifyjs
+    - uses: actions/setup-go@v2
+      with:
+        go-version: '^${{env.GO_VERSION}}'
+    - run: echo "$ACCESS_KEY_ID" > config/test/access-key-id
+    - run: echo "$AWS_ACCOUNT_ID" > config/test/aws-account-id
+    - run: echo "$S3_BUCKET" > config/test/s3-bucket
     - run: echo "$TEST_AWS_SECRET_ACCESS_KEY" > config/test/secret-access-key
       env:
         TEST_AWS_SECRET_ACCESS_KEY: ${{secrets.TEST_AWS_SECRET_ACCESS_KEY}}
@@ -33,15 +75,27 @@ jobs:
       with:
         github_token: ${{secrets.GITHUB_TOKEN}}
         files: work/report.xml
-    - run: docker container run --rm --entrypoint /bin/bash --mount type=bind,source="$(pwd)",target=/workspace amazonlinux:1 -c 'yum install -y golang gcc && cd /workspace && GOOS=linux go build -o work/imgconv lambda/lambda.go'
-    - run: zip -j work/imgconv.zip work/imgconv
+
+  bundle:
+    needs:
+    - build-go
+    - build-uglifyjs
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/download-artifact@v2
+      with:
+        name: artifact
+    - run: chmod +x imgconv uglifyjs
+    - run: zip -j imgconv.zip ./imgconv ./uglifyjs
     - uses: actions/upload-artifact@v2
       with:
         name: artifact
-        path: work/imgconv.zip
+        path: imgconv.zip
 
   release:
-    needs: build
+    needs:
+    - bundle
+    - test
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-20.04
     env:
@@ -79,4 +133,4 @@ jobs:
         aws-access-key-id: AKIAQGFE5ESVPYTGC33F
         aws-secret-access-key: ${{secrets.AWS_SECRET_ACCESS_KEY}}
         aws-region: ap-northeast-1
-    - run: aws s3 cp ./imgconv.zip s3://${{env.BUCKET_NAME}}/imgconv/imgconv.build-${{env.BUILD_NUMBER}}-awslambda-go1x.zip
+    - run: aws s3 cp ./imgconv.zip s3://$BUCKET_NAME/imgconv/imgconv.build-$BUILD_NUMBER-awslambda-go1x.zip
