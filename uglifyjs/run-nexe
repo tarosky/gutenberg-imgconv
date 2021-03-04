@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -eu
+
+source uglifyjs/envs.sh
+exec docker-compose -f uglifyjs/docker-compose.yml run --rm nexe

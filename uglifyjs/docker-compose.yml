@@ -1,0 +1,18 @@
+version: '3.9'
+services:
+  nexe:
+    build:
+      context: $PWD
+      dockerfile: uglifyjs/Dockerfile
+      args:
+        uid: $USER_ID
+        gid: $GROUP_ID
+        nodejs_version: $NODEJS_VERSION
+    command:
+    - uglify-js
+    - $UGLIFYJS_VERSION
+    - uglifyjs
+    - /workspace/work/uglifyjs
+    user: $USER_ID:$GROUP_ID
+    volumes:
+    - $PWD:/workspace
