@@ -78,7 +78,7 @@ func main() {
 
 		path := c.Args().Get(0)
 
-		env := imgconv.NewEnvironment(cfg)
+		env := imgconv.NewEnvironment(c.Context, cfg)
 
 		if err := env.Convert(c.Context, path); err != nil {
 			return fmt.Errorf("failed to convert: %s", path)

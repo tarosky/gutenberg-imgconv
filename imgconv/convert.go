@@ -3,6 +3,7 @@ package imgconv
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"os"
@@ -13,8 +14,9 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 	"github.com/chai2010/webp"
 	"go.uber.org/zap"
 )
@@ -27,8 +29,8 @@ type fileInfo struct {
 const (
 	webPContentType string = "image/webp"
 
-	timestampMetadata = "Original-Timestamp"
-	pathMetadata      = "Original-Path"
+	timestampMetadata = "original-timestamp"
+	pathMetadata      = "original-path"
 )
 
 // Convert converts an image at specified S3 key into WebP
@@ -37,20 +39,22 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 	s3SrcKey := filepath.Join(e.S3SrcKeyBase, path)
 
 	srcObj := func(ctx context.Context) (*s3.GetObjectOutput, error) {
-		res, err := e.S3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
+		res, err := e.S3Client.GetObject(ctx, &s3.GetObjectInput{
 			Bucket: &e.S3Bucket,
 			Key:    &s3SrcKey,
 		})
 		if err != nil {
-			if awsErr, ok := err.(awserr.Error); ok {
-				if awsErr.Code() == s3.ErrCodeNoSuchKey {
-					return nil, nil
-				}
+			var noSuchKeyError *types.NoSuchKey
+			if errors.As(err, &noSuchKeyError) {
+				return nil, nil
+			}
 
+			var apiErr smithy.APIError
+			if errors.As(err, &apiErr) {
 				e.log.Error("failed to GET object",
 					zapPathField,
-					zap.String("aws-code", awsErr.Code()),
-					zap.String("aws-message", awsErr.Message()))
+					zap.String("aws-code", apiErr.ErrorCode()),
+					zap.String("aws-message", apiErr.ErrorMessage()))
 				return nil, err
 			}
 
@@ -58,10 +62,10 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 			return nil, err
 		}
 
-		if e.MaxFileSize < *res.ContentLength {
+		if e.MaxFileSize < res.ContentLength {
 			e.log.Warn("file is larger than predefined limit",
 				zapPathField,
-				zap.Int64("size", *res.ContentLength),
+				zap.Int64("size", res.ContentLength),
 				zap.Int64("max-file-size", e.MaxFileSize))
 			return nil, err
 		}
@@ -86,11 +90,29 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		return &buf, nil
 	}
 
-	uploadToS3 := func(ctx context.Context, obj *s3.GetObjectOutput, webP *bytes.Buffer) error {
+	// uglifyJS := func(ctx context.Context, obj *s3.GetObjectOutput) (*bytes.Buffer, error) {
+	// 	// Non-existent S3 object
+	// 	if obj == nil {
+	// 		return nil, nil
+	// 	}
+
+	// 	pr, pw := io.Pipe()
+
+	// 	cmd := exec.CommandContext(ctx, e.Config.UglifyJSPath, "-c", "-m")
+	// 	cmd.Stdin = pr
+
+	// 	return &buf, nil
+	// }
+
+	uploadWebPToS3 := func(
+		ctx context.Context,
+		obj *s3.GetObjectOutput,
+		webP *bytes.Buffer,
+	) error {
 		s3key := filepath.Join(e.S3DestKeyBase, path+".webp")
 
 		if obj == nil {
-			if _, err := e.S3Client.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
+			if _, err := e.S3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 				Bucket: &e.S3Bucket,
 				Key:    &s3key,
 			}); err != nil {
@@ -103,22 +125,21 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		}
 
 		timestamp := obj.Metadata[timestampMetadata]
-		if timestamp == nil {
+		if timestamp == "" {
 			e.log.Error("no timestamp", zapPathField, zap.String("s3key", s3key))
 			return fmt.Errorf("no timestamp: %s", s3key)
 		}
 
 		contentType := webPContentType
-		storage := s3.StorageClassStandardIa
 		afterSize := webP.Len()
-		if _, err := e.S3Client.PutObject(&s3.PutObjectInput{
+		if _, err := e.S3Client.PutObject(ctx, &s3.PutObjectInput{
 			Body:         bytes.NewReader(webP.Bytes()),
 			Bucket:       &e.S3Bucket,
 			ContentType:  &contentType,
 			Key:          &s3key,
-			StorageClass: &storage,
-			Metadata: map[string]*string{
-				pathMetadata:      &path,
+			StorageClass: types.StorageClassStandardIa,
+			Metadata: map[string]string{
+				pathMetadata:      path,
 				timestampMetadata: timestamp,
 			},
 		}); err != nil {
@@ -128,7 +149,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		e.log.Info("converted",
 			zapPathField,
-			zap.Int64("before", *obj.ContentLength),
+			zap.Int64("before", obj.ContentLength),
 			zap.Int("after", afterSize))
 		return nil
 	}
@@ -150,5 +171,5 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		return err
 	}
 
-	return uploadToS3(ctx, obj, webP)
+	return uploadWebPToS3(ctx, obj, webP)
 }

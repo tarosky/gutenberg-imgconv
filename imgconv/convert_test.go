@@ -1,12 +1,13 @@
 package imgconv
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -15,7 +16,7 @@ type ConvertSuite struct {
 }
 
 func (s *ConvertSuite) SetupTest() {
-	s.env = newTestEnvironment("convert", s.TestSuite)
+	s.env = newTestEnvironment(s.ctx, "convert", s.TestSuite)
 
 	copy(s.ctx, sampleJPEG, s.env.S3SrcKeyBase+"/dir/image.jpg", s.TestSuite)
 	copy(s.ctx, samplePNG, s.env.S3SrcKeyBase+"/dir/image.png", s.TestSuite)
@@ -32,7 +33,7 @@ func TestConvertSuite(t *testing.T) {
 
 func (s *ConvertSuite) assertS3ObjectExists(path string) {
 	key := s.env.S3DestKeyBase + "/" + path + ".webp"
-	res, err := s.env.S3Client.GetObjectWithContext(s.ctx, &s3.GetObjectInput{
+	res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
 		Bucket: &s.env.S3Bucket,
 		Key:    &key,
 	})
@@ -49,7 +50,7 @@ func (s *ConvertSuite) assertS3ObjectExists(path string) {
 
 	srcKey := s.env.S3SrcKeyBase + "/" + path
 
-	info, err := s.env.S3Client.HeadObjectWithContext(s.ctx, &s3.HeadObjectInput{
+	info, err := s.env.S3Client.HeadObject(s.ctx, &s3.HeadObjectInput{
 		Bucket: &s.env.S3Bucket,
 		Key:    &srcKey,
 	})
@@ -57,27 +58,26 @@ func (s *ConvertSuite) assertS3ObjectExists(path string) {
 
 	s.Assert().Equal(webPContentType, http.DetectContentType(head))
 	s.Assert().Equal(webPContentType, *res.ContentType)
-	s.Assert().Greater(*info.ContentLength, *res.ContentLength, "file size has been decreased")
+	s.Assert().Greater(info.ContentLength, res.ContentLength, "file size has been decreased")
 
-	s3SrcObjTime, err := time.Parse(time.RFC3339Nano, *info.Metadata[timestampMetadata])
+	s3SrcObjTime, err := time.Parse(time.RFC3339Nano, info.Metadata[timestampMetadata])
 	s.Require().NoError(err)
 
-	s3DestObjTime, err := time.Parse(time.RFC3339Nano, *res.Metadata[timestampMetadata])
+	s3DestObjTime, err := time.Parse(time.RFC3339Nano, res.Metadata[timestampMetadata])
 	s.Assert().NoError(err)
 
 	s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
-	s.Assert().Equal(path, *res.Metadata[pathMetadata])
+	s.Assert().Equal(path, res.Metadata[pathMetadata])
 }
 
 func (s *ConvertSuite) assertS3ObjectNotExists(key string) {
-	_, err := s.env.S3Client.GetObject(&s3.GetObjectInput{
+	_, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
 		Bucket: &s.env.S3Bucket,
 		Key:    &key,
 	})
 
-	aerr, ok := err.(awserr.Error)
-	s.Require().True(ok)
-	s.Assert().EqualValues(s3.ErrCodeNoSuchKey, aerr.Code())
+	var noSuchKeyError *types.NoSuchKey
+	s.Assert().True(errors.As(err, &noSuchKeyError))
 }
 
 func (s *ConvertSuite) TestConvertJPG() {
@@ -101,7 +101,7 @@ func (s *ConvertSuite) TestConvertRemoved() {
 
 	{
 		key := s.env.S3SrcKeyBase + "/" + imgPath
-		_, err := s.env.S3Client.DeleteObjectWithContext(s.ctx, &s3.DeleteObjectInput{
+		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
 			Bucket: &s.env.S3Bucket,
 			Key:    &key,
 		})

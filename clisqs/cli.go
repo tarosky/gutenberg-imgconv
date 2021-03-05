@@ -128,7 +128,7 @@ func main() {
 			Log:                  log,
 		}
 
-		env := imgconv.NewEnvironment(cfg)
+		env := imgconv.NewEnvironment(c.Context, cfg)
 		env.ConvertSQSCLI(c.Context)
 
 		return nil
