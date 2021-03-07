@@ -213,8 +213,23 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 	uglifyJSCommand := func(
 		srcBody io.Reader,
 		minifiedJSPath string,
-	) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
-		var stdoutBuf, stderrBuf bytes.Buffer
+		tempDir string,
+	) (*exec.Cmd, *bytes.Buffer, error) {
+		srcPath := tempDir + "/src.js"
+		file, err := os.Create(srcPath)
+		if err != nil {
+			e.log.Error("failed to create temporary file",
+				zapPathField,
+				zap.Error(err),
+			)
+			return nil, nil, err
+		}
+
+		if _, err := io.Copy(file, srcBody); err != nil {
+
+		}
+
+		var stderrBuf bytes.Buffer
 		cmd := exec.CommandContext(
 			ctx,
 			e.Config.UglifyJSPath,
@@ -222,14 +237,14 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 			"--mangle",
 			"--keep-fnames",
 			"--source-map",
+			"url='http://ex.com/wp-includes/test.js.map',filename='test.js',includeSources='work/jquery/test.js'",
 			"--output",
 			minifiedJSPath,
 		)
-		cmd.Stdin = srcBody
-		cmd.Stdout = &stdoutBuf
+		cmd.Stdout = ioutil.Discard
 		cmd.Stderr = &stderrBuf
 
-		return cmd, &stdoutBuf, &stderrBuf
+		return cmd, &stderrBuf, nil
 	}
 
 	updateMinifiedJSS3Object := func(
@@ -349,7 +364,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		minifiedJSPath := tempDir + "/out.js"
 		sourceMapPath := tempDir + "/out.js.map"
 
-		cmd, stdoutBuf, stderrBuf := uglifyJSCommand(srcObj.Body, minifiedJSPath)
+		cmd, stdoutBuf, stderrBuf := uglifyJSCommand(srcObj.Body, minifiedJSPath, tempDir)
 		if err := cmd.Run(); err != nil {
 			e.log.Error("failed to run uglifyjs",
 				zapPathField,
