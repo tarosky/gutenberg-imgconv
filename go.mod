@@ -12,6 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.1.1
 	github.com/aws/smithy-go v1.1.0
 	github.com/chai2010/webp v1.1.0
+	github.com/gabriel-vasile/mimetype v1.1.2
 	github.com/kr/pretty v0.2.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/stretchr/testify v1.6.1

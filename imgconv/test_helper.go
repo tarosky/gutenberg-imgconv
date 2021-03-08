@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	sampleJPEG = "sampleimg/image.jpg"
-	samplePNG  = "sampleimg/image.png"
+	sampleJPEG = "samplefile/image.jpg"
+	samplePNG  = "samplefile/image.png"
+	sampleJS   = "samplefile/fizzbuzz.js"
 )
 
 // InitTest moves working directory to project root directory.
@@ -72,6 +73,7 @@ func getTestConfig(name string) *Config {
 		Region:               region,
 		AccessKeyID:          readTestConfig("access-key-id"),
 		SecretAccessKey:      readTestConfig("secret-access-key"),
+		BaseURL:              "https://example.com",
 		S3Bucket:             readTestConfig("s3-bucket"),
 		S3SrcKeyBase:         s3SrcPath,
 		S3DestKeyBase:        generateSafeRandomString() + "/" + name,

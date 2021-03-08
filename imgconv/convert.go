@@ -130,7 +130,9 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 				return 0, err
 			}
 
-			e.log.Info("deleted removed file", zapPathField)
+			e.log.Info("deleted removed file",
+				zapPathField,
+				zap.String("s3key", s3key))
 			return 0, nil
 		}
 
@@ -210,41 +212,66 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		return nil
 	}
 
+	saveOriginalJSToFile := func(srcPath string, srcBody io.Reader) error {
+		file, err := os.Create(srcPath)
+		if err != nil {
+			e.log.Error("failed to create temporary file", zapPathField, zap.Error(err))
+			return err
+		}
+		defer func() {
+			if err := file.Close(); err != nil {
+				e.log.Error("failed to close copied JS file", zapPathField, zap.Error(err))
+			}
+		}()
+
+		if _, err := io.Copy(file, srcBody); err != nil {
+			e.log.Error("failed to save original JS file", zapPathField, zap.Error(err))
+			return err
+		}
+		return nil
+	}
+
 	uglifyJSCommand := func(
 		srcBody io.Reader,
 		minifiedJSPath string,
 		tempDir string,
-	) (*exec.Cmd, *bytes.Buffer, error) {
+	) error {
 		srcPath := tempDir + "/src.js"
-		file, err := os.Create(srcPath)
-		if err != nil {
-			e.log.Error("failed to create temporary file",
-				zapPathField,
-				zap.Error(err),
-			)
-			return nil, nil, err
-		}
-
-		if _, err := io.Copy(file, srcBody); err != nil {
-
+		if err := saveOriginalJSToFile(srcPath, srcBody); err != nil {
+			return err
 		}
 
 		var stderrBuf bytes.Buffer
 		cmd := exec.CommandContext(
 			ctx,
 			e.Config.UglifyJSPath,
+			srcPath,
 			"--compress",
 			"--mangle",
 			"--keep-fnames",
 			"--source-map",
-			"url='http://ex.com/wp-includes/test.js.map',filename='test.js',includeSources='work/jquery/test.js'",
+			fmt.Sprintf("url='%s/%s.map',filename='%s',includeSources='%s'",
+				e.Config.BaseURL,
+				path,
+				filepath.Base(minifiedJSPath),
+				srcPath,
+			),
 			"--output",
 			minifiedJSPath,
 		)
 		cmd.Stdout = ioutil.Discard
 		cmd.Stderr = &stderrBuf
 
-		return cmd, &stderrBuf, nil
+		if err := cmd.Run(); err != nil {
+			e.log.Error("failed to run uglifyjs",
+				zapPathField,
+				zap.Error(err),
+				zap.String("stderr", stderrBuf.String()),
+			)
+			return err
+		}
+
+		return nil
 	}
 
 	updateMinifiedJSS3Object := func(
@@ -275,20 +302,17 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 			}()
 		}
 
-		size, err := updateS3Object(
-			ctx,
-			srcObj,
-			jsFile,
-			filepath.Join(e.S3DestKeyBase, path+".webp"),
-			javaScriptContentType,
-		)
+		key := filepath.Join(e.S3DestKeyBase, path)
+
+		size, err := updateS3Object(ctx, srcObj, jsFile, key, javaScriptContentType)
 		if err != nil {
 			return err
 		}
 
 		if size != 0 {
-			e.log.Info("javascript minified",
+			e.log.Info("JavaScript minified",
 				zapPathField,
+				zap.String("s3key", key),
 				zap.Int64("before", srcObj.ContentLength),
 				zap.Int64("after", size))
 		}
@@ -317,35 +341,28 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 					e.log.Error("failed to close source map file",
 						zapPathField,
 						zap.Error(err),
-						zap.String("filepath", sourceMapPath),
-					)
+						zap.String("filepath", sourceMapPath))
 				}
 			}()
 		}
 
-		size, err := updateS3Object(
-			ctx,
-			srcObj,
-			mapFile,
-			filepath.Join(e.S3DestKeyBase, path+".webp"),
-			javaScriptContentType,
-		)
+		key := filepath.Join(e.S3DestKeyBase, path+".map")
+
+		size, err := updateS3Object(ctx, srcObj, mapFile, key, sourceMapContentType)
 		if err != nil {
 			return err
 		}
 
 		if size != 0 {
-			e.log.Info("source map generated", zapPathField, zap.Int64("size", size))
+			e.log.Info("source map generated",
+				zapPathField,
+				zap.String("s3key", key),
+				zap.Int64("size", size))
 		}
 		return nil
 	}
 
 	minifyJavaScript := func(ctx context.Context, srcObj *s3.GetObjectOutput) error {
-		// Source S3 object exists.
-		if srcObj != nil {
-			return nil
-		}
-
 		tempDir, err := ioutil.TempDir("", "")
 		if err != nil {
 			e.log.Error("failed to create temp dir", zapPathField, zap.Error(err))
@@ -364,15 +381,10 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		minifiedJSPath := tempDir + "/out.js"
 		sourceMapPath := tempDir + "/out.js.map"
 
-		cmd, stdoutBuf, stderrBuf := uglifyJSCommand(srcObj.Body, minifiedJSPath, tempDir)
-		if err := cmd.Run(); err != nil {
-			e.log.Error("failed to run uglifyjs",
-				zapPathField,
-				zap.Error(err),
-				zap.String("stdout", stdoutBuf.String()),
-				zap.String("stderr", stderrBuf.String()),
-			)
-			return err
+		if srcObj != nil {
+			if err := uglifyJSCommand(srcObj.Body, minifiedJSPath, tempDir); err != nil {
+				return err
+			}
 		}
 
 		errGroup, ctx := errgroup.WithContext(ctx)

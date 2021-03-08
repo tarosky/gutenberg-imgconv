@@ -24,6 +24,7 @@ type Config struct {
 	Region               string
 	AccessKeyID          string
 	SecretAccessKey      string
+	BaseURL              string
 	S3Bucket             string
 	S3SrcKeyBase         string
 	S3DestKeyBase        string

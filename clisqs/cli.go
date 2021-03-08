@@ -115,6 +115,7 @@ func main() {
 
 		cfg := &imgconv.Config{
 			Region:               c.String("region"),
+			BaseURL:              c.String("base-url"),
 			S3Bucket:             c.String("s3-bucket"),
 			S3SrcKeyBase:         c.String("s3-src-key-base"),
 			S3DestKeyBase:        c.String("s3-dest-key-base"),

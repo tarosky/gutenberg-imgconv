@@ -94,6 +94,7 @@ func getEnvDuration(key string, fallback string) time.Duration {
 func main() {
 	env = imgconv.NewEnvironment(context.Background(), &imgconv.Config{
 		Region:               os.Getenv("AWS_REGION"),
+		BaseURL:              os.Getenv("BASE_URL"),
 		S3Bucket:             os.Getenv("S3_BUCKET"),
 		S3SrcKeyBase:         os.Getenv("S3_SRC_KEY_BASE"),
 		S3DestKeyBase:        os.Getenv("S3_DEST_KEY_BASE"),
