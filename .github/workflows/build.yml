@@ -14,7 +14,7 @@ env:
   ACCESS_KEY_ID: AKIAQGFE5ESVOYCL2ANC
   AWS_ACCOUNT_ID: 013230744746
   S3_BUCKET: gutenberg-modrepo-testbucket-66i59vgigq34
-  GO_VERSION: 1.16.0
+  GO_VERSION: 1.15.8
 
 jobs:
   build-go:
@@ -66,6 +66,7 @@ jobs:
       env:
         TEST_AWS_SECRET_ACCESS_KEY: ${{secrets.TEST_AWS_SECRET_ACCESS_KEY}}
     - run: go get -u github.com/jstemmer/go-junit-report
+    - run: ls -Rla
     - run: go test -v ./imgconv 2>&1 | tee work/test.log
     - run: go-junit-report < work/test.log > work/report.xml
     - name: Publish Unit Test Results
