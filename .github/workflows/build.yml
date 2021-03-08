@@ -8,7 +8,7 @@ on:
     branches:
     - master
     - issue/*
-    # - dev/harai
+    - dev/harai
 
 env:
   ACCESS_KEY_ID: AKIAQGFE5ESVOYCL2ANC
@@ -94,7 +94,8 @@ jobs:
     needs:
     - bundle
     - test
-    if: github.ref == 'refs/heads/master'
+    # if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/dev/harai'
     runs-on: ubuntu-20.04
     env:
       BUCKET_NAME: gutenberg-modrepo-modulerepobucket-99uoevgdqlvw
