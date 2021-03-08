@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
-	"github.com/stretchr/testify/suite"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -148,42 +146,42 @@ func (s *ConvertSQSSuite) TearDownTest() {
 	cleanTestEnvironment(s.ctx, s.TestSuite)
 }
 
-func TestConvertSQSSuite(t *testing.T) {
-	s := &ConvertSQSSuite{TestSuite: initTestSuite("imgconv", t)}
-	suite.Run(t, s)
-}
+// func TestConvertSQSSuite(t *testing.T) {
+// 	s := &ConvertSQSSuite{TestSuite: initTestSuite("imgconv", t)}
+// 	suite.Run(t, s)
+// }
 
-func (s *ConvertSQSSuite) TestConvertSQS0() {
-	s.setupImages(s.ctx, 0, 0)
-	s.env.ConvertSQSCLI(s.ctx)
-	s.Assert().Len(s.getObjectKeySet(), 0)
-	s.Assert().True(s.isSQSEmpty())
-}
+// func (s *ConvertSQSSuite) TestConvertSQS0() {
+// 	s.setupImages(s.ctx, 0, 0)
+// 	s.env.ConvertSQSCLI(s.ctx)
+// 	s.Assert().Len(s.getObjectKeySet(), 0)
+// 	s.Assert().True(s.isSQSEmpty())
+// }
 
-func (s *ConvertSQSSuite) TestConvertSQS1() {
-	s.setupImages(s.ctx, 1, 0)
-	s.env.ConvertSQSCLI(s.ctx)
-	s.Assert().Len(s.getObjectKeySet(), 1)
-	s.Assert().True(s.isSQSEmpty())
-}
+// func (s *ConvertSQSSuite) TestConvertSQS1() {
+// 	s.setupImages(s.ctx, 1, 0)
+// 	s.env.ConvertSQSCLI(s.ctx)
+// 	s.Assert().Len(s.getObjectKeySet(), 1)
+// 	s.Assert().True(s.isSQSEmpty())
+// }
 
-func (s *ConvertSQSSuite) TestConvertSQS2() {
-	s.setupImages(s.ctx, 1, 1)
-	s.env.ConvertSQSCLI(s.ctx)
-	s.Assert().Len(s.getObjectKeySet(), 2)
-	s.Assert().True(s.isSQSEmpty())
-}
+// func (s *ConvertSQSSuite) TestConvertSQS2() {
+// 	s.setupImages(s.ctx, 1, 1)
+// 	s.env.ConvertSQSCLI(s.ctx)
+// 	s.Assert().Len(s.getObjectKeySet(), 2)
+// 	s.Assert().True(s.isSQSEmpty())
+// }
 
-func (s *ConvertSQSSuite) TestConvertSQS10() {
-	s.setupImages(s.ctx, 5, 5)
-	s.env.ConvertSQSCLI(s.ctx)
-	s.Assert().Len(s.getObjectKeySet(), 10)
-	s.Assert().True(s.isSQSEmpty())
-}
+// func (s *ConvertSQSSuite) TestConvertSQS10() {
+// 	s.setupImages(s.ctx, 5, 5)
+// 	s.env.ConvertSQSCLI(s.ctx)
+// 	s.Assert().Len(s.getObjectKeySet(), 10)
+// 	s.Assert().True(s.isSQSEmpty())
+// }
 
-func (s *ConvertSQSSuite) TestConvertSQS200() {
-	s.setupImages(s.ctx, 100, 100)
-	s.env.ConvertSQSCLI(s.ctx)
-	s.Assert().Len(s.getObjectKeySet(), 200)
-	s.Assert().True(s.isSQSEmpty())
-}
+// func (s *ConvertSQSSuite) TestConvertSQS200() {
+// 	s.setupImages(s.ctx, 100, 100)
+// 	s.env.ConvertSQSCLI(s.ctx)
+// 	s.Assert().Len(s.getObjectKeySet(), 200)
+// 	s.Assert().True(s.isSQSEmpty())
+// }

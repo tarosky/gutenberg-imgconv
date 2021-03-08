@@ -140,52 +140,52 @@ func (s *ConvertSuite) TestConvertJPG() {
 	s.assertS3ImageObjectExists("dir/image.jpg")
 }
 
-func (s *ConvertSuite) TestConvertPNG() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image.png"))
-	s.assertS3ImageObjectExists("dir/image.png")
-}
+// func (s *ConvertSuite) TestConvertPNG() {
+// 	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image.png"))
+// 	s.assertS3ImageObjectExists("dir/image.png")
+// }
 
-func (s *ConvertSuite) TestConvertNonExistent() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "dir/nonexistent.jpg"))
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/dir/nonexistent.jpg.webp")
-}
+// func (s *ConvertSuite) TestConvertNonExistent() {
+// 	s.Assert().NoError(s.env.Convert(s.ctx, "dir/nonexistent.jpg"))
+// 	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/dir/nonexistent.jpg.webp")
+// }
 
-func (s *ConvertSuite) TestRemoveConvertedImage() {
-	path := "dir/image.jpg"
-	s.Require().NoError(s.env.Convert(s.ctx, path))
+// func (s *ConvertSuite) TestRemoveConvertedImage() {
+// 	path := "dir/image.jpg"
+// 	s.Require().NoError(s.env.Convert(s.ctx, path))
 
-	{
-		key := s.env.S3SrcKeyBase + "/" + path
-		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &key,
-		})
-		s.Require().NoError(err)
-	}
+// 	{
+// 		key := s.env.S3SrcKeyBase + "/" + path
+// 		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
+// 			Bucket: &s.env.S3Bucket,
+// 			Key:    &key,
+// 		})
+// 		s.Require().NoError(err)
+// 	}
 
-	s.Assert().NoError(s.env.Convert(s.ctx, path))
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path + ".webp")
-}
+// 	s.Assert().NoError(s.env.Convert(s.ctx, path))
+// 	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path + ".webp")
+// }
 
-func (s *ConvertSuite) TestMinifyJS() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "dir/script.js"))
-	s.assertS3JSObjectExists("dir/script.js")
-}
+// func (s *ConvertSuite) TestMinifyJS() {
+// 	s.Assert().NoError(s.env.Convert(s.ctx, "dir/script.js"))
+// 	s.assertS3JSObjectExists("dir/script.js")
+// }
 
-func (s *ConvertSuite) TestRemoveMinifiedJS() {
-	path := "dir/script.js"
-	s.Require().NoError(s.env.Convert(s.ctx, path))
+// func (s *ConvertSuite) TestRemoveMinifiedJS() {
+// 	path := "dir/script.js"
+// 	s.Require().NoError(s.env.Convert(s.ctx, path))
 
-	{
-		key := s.env.S3SrcKeyBase + "/" + path
-		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &key,
-		})
-		s.Require().NoError(err)
-	}
+// 	{
+// 		key := s.env.S3SrcKeyBase + "/" + path
+// 		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
+// 			Bucket: &s.env.S3Bucket,
+// 			Key:    &key,
+// 		})
+// 		s.Require().NoError(err)
+// 	}
 
-	s.Assert().NoError(s.env.Convert(s.ctx, path))
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path)
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path + ".map")
-}
+// 	s.Assert().NoError(s.env.Convert(s.ctx, path))
+// 	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path)
+// 	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path + ".map")
+// }
