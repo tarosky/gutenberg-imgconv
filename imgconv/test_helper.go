@@ -120,7 +120,7 @@ func cleanTestEnvironment(ctx context.Context, s *TestSuite) {
 	if _, err := s.env.SQSClient.DeleteQueue(ctx, &sqs.DeleteQueueInput{
 		QueueUrl: &s.env.SQSQueueURL,
 	}); err != nil {
-		s.env.log.Error("failed to clean up SQS queue", zap.Error(err))
+		s.env.log.Error("failed to clean up SQS queue", zap.Error(err), zap.String("url", s.env.SQSQueueURL))
 	}
 }
 
