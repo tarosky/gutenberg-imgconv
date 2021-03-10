@@ -1,0 +1,6 @@
+/* sample CSS flie */
+.Header-banner,
+.Banner,
+.navbar-blm {
+  display: none !important;
+}

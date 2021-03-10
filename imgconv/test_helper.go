@@ -12,16 +12,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 )
 
 const (
-	sampleJPEG = "sampleimg/image.jpg"
-	samplePNG  = "sampleimg/image.png"
+	sampleJPEG = "samplefile/image.jpg"
+	samplePNG  = "samplefile/image.png"
+	sampleJS   = "samplefile/fizzbuzz.js"
+	sampleCSS  = "samplefile/style.css"
 )
 
 // InitTest moves working directory to project root directory.
@@ -71,6 +74,7 @@ func getTestConfig(name string) *Config {
 		Region:               region,
 		AccessKeyID:          readTestConfig("access-key-id"),
 		SecretAccessKey:      readTestConfig("secret-access-key"),
+		BaseURL:              "https://example.com",
 		S3Bucket:             readTestConfig("s3-bucket"),
 		S3SrcKeyBase:         s3SrcPath,
 		S3DestKeyBase:        generateSafeRandomString() + "/" + name,
@@ -82,6 +86,7 @@ func getTestConfig(name string) *Config {
 		RetrieverCount:       2,
 		DeleterCount:         2,
 		OrderStop:            30 * time.Second,
+		UglifyJSPath:         "work/uglifyjs",
 		Log:                  CreateLogger(),
 	}
 }
@@ -91,12 +96,12 @@ func getTestSQSQueueNameFromURL(url string) string {
 	return parts[len(parts)-1]
 }
 
-func newTestEnvironment(name string, s *TestSuite) *Environment {
-	e := NewEnvironment(getTestConfig(name))
+func newTestEnvironment(ctx context.Context, name string, s *TestSuite) *Environment {
+	e := NewEnvironment(ctx, getTestConfig(name))
 
 	sqsName := getTestSQSQueueNameFromURL(e.SQSQueueURL)
 
-	_, err := e.SQSClient.CreateQueueWithContext(s.ctx, &sqs.CreateQueueInput{
+	_, err := e.SQSClient.CreateQueue(s.ctx, &sqs.CreateQueueInput{
 		QueueName: &sqsName,
 	})
 	require.NoError(s.T(), err, "failed to create SQS queue")
@@ -113,7 +118,7 @@ func initTestSuite(name string, t require.TestingT) *TestSuite {
 }
 
 func cleanTestEnvironment(ctx context.Context, s *TestSuite) {
-	if _, err := s.env.SQSClient.DeleteQueueWithContext(ctx, &sqs.DeleteQueueInput{
+	if _, err := s.env.SQSClient.DeleteQueue(ctx, &sqs.DeleteQueueInput{
 		QueueUrl: &s.env.SQSQueueURL,
 	}); err != nil {
 		s.env.log.Error("failed to clean up SQS queue", zap.Error(err))
@@ -137,18 +142,15 @@ func copy(ctx context.Context, src, dst string, s *TestSuite) {
 	info, err := in.Stat()
 	s.Require().NoError(err)
 
-	timestamp := info.ModTime().UTC().Format(time.RFC3339Nano)
-
 	{
-		storage := s3.StorageClassStandardIa
-		_, err := s.env.S3Client.PutObjectWithContext(ctx, &s3.PutObjectInput{
+		_, err := s.env.S3Client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket:       &s.env.S3Bucket,
 			Key:          &dst,
 			Body:         in,
-			StorageClass: &storage,
-			Metadata: map[string]*string{
-				pathMetadata:      &src,
-				timestampMetadata: &timestamp,
+			StorageClass: types.StorageClassStandardIa,
+			Metadata: map[string]string{
+				pathMetadata:      src,
+				timestampMetadata: info.ModTime().UTC().Format(time.RFC3339Nano),
 			},
 		})
 		s.Require().NoError(err)

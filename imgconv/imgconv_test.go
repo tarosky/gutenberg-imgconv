@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/sync/errgroup"
 )
@@ -18,14 +19,14 @@ type ConvertSQSSuite struct {
 	*TestSuite
 }
 
-func (s *ConvertSQSSuite) sendSQSMessages(entries []*sqs.SendMessageBatchRequestEntry) {
+func (s *ConvertSQSSuite) sendSQSMessages(entries []types.SendMessageBatchRequestEntry) {
 	const maxEntries = 10
 
-	var chunk []*sqs.SendMessageBatchRequestEntry
+	var chunk []types.SendMessageBatchRequestEntry
 
 	for maxEntries < len(entries) {
 		chunk, entries = entries[0:maxEntries], entries[maxEntries:]
-		res, err := s.env.SQSClient.SendMessageBatchWithContext(
+		res, err := s.env.SQSClient.SendMessageBatch(
 			s.ctx,
 			&sqs.SendMessageBatchInput{
 				Entries:  chunk,
@@ -36,7 +37,7 @@ func (s *ConvertSQSSuite) sendSQSMessages(entries []*sqs.SendMessageBatchRequest
 	}
 
 	if 0 < len(entries) {
-		res, err := s.env.SQSClient.SendMessageBatchWithContext(
+		res, err := s.env.SQSClient.SendMessageBatch(
 			s.ctx,
 			&sqs.SendMessageBatchInput{
 				Entries:  entries,
@@ -50,9 +51,8 @@ func (s *ConvertSQSSuite) sendSQSMessages(entries []*sqs.SendMessageBatchRequest
 func (s *ConvertSQSSuite) isSQSEmpty() bool {
 	time.Sleep(time.Duration(s.env.SQSVisibilityTimeout) * time.Second)
 
-	waitTime := int64(1)
-	res, err := s.env.SQSClient.ReceiveMessageWithContext(s.ctx, &sqs.ReceiveMessageInput{
-		WaitTimeSeconds: &waitTime,
+	res, err := s.env.SQSClient.ReceiveMessage(s.ctx, &sqs.ReceiveMessageInput{
+		WaitTimeSeconds: 1,
 		QueueUrl:        &s.env.SQSQueueURL,
 	})
 	s.Require().NoError(err)
@@ -61,12 +61,12 @@ func (s *ConvertSQSSuite) isSQSEmpty() bool {
 }
 
 func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount int) {
-	entryCh := make(chan *sqs.SendMessageBatchRequestEntry)
-	entriesCh := make(chan []*sqs.SendMessageBatchRequestEntry)
+	entryCh := make(chan *types.SendMessageBatchRequestEntry)
+	entriesCh := make(chan []types.SendMessageBatchRequestEntry)
 	eg, ctx := errgroup.WithContext(ctx)
 
 	go func() {
-		sqsEntries := make([]*sqs.SendMessageBatchRequestEntry, 0, jpgCount+pngCount)
+		sqsEntries := make([]types.SendMessageBatchRequestEntry, 0, jpgCount+pngCount)
 		defer func() {
 			entriesCh <- sqsEntries
 			close(entriesCh)
@@ -78,7 +78,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 				if !ok {
 					return
 				}
-				sqsEntries = append(sqsEntries, e)
+				sqsEntries = append(sqsEntries, *e)
 			case <-ctx.Done():
 				return
 			}
@@ -94,7 +94,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 			s.Require().NoError(err)
 			mb := string(jb)
 			id := "jpg-" + strconv.Itoa(i)
-			entryCh <- &sqs.SendMessageBatchRequestEntry{
+			entryCh <- &types.SendMessageBatchRequestEntry{
 				Id:          &id,
 				MessageBody: &mb,
 			}
@@ -111,7 +111,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 			s.Require().NoError(err)
 			mb := string(jb)
 			id := "png-" + strconv.Itoa(i)
-			entryCh <- &sqs.SendMessageBatchRequestEntry{
+			entryCh <- &types.SendMessageBatchRequestEntry{
 				Id:          &id,
 				MessageBody: &mb,
 			}
@@ -128,7 +128,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 func (s *ConvertSQSSuite) getObjectKeySet() map[string]struct{} {
 	keySet := map[string]struct{}{}
 
-	res, err := s.env.S3Client.ListObjectsV2WithContext(s.ctx, &s3.ListObjectsV2Input{
+	res, err := s.env.S3Client.ListObjectsV2(s.ctx, &s3.ListObjectsV2Input{
 		Bucket: &s.env.S3Bucket,
 		Prefix: &s.env.S3DestKeyBase,
 	})
@@ -141,7 +141,7 @@ func (s *ConvertSQSSuite) getObjectKeySet() map[string]struct{} {
 }
 
 func (s *ConvertSQSSuite) SetupTest() {
-	s.env = newTestEnvironment("imgconv", s.TestSuite)
+	s.env = newTestEnvironment(s.ctx, "imgconv", s.TestSuite)
 }
 
 func (s *ConvertSQSSuite) TearDownTest() {

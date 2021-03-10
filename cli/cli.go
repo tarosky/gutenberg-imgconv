@@ -30,6 +30,10 @@ func main() {
 			Value:   "ap-northeast-1",
 		},
 		&cli.StringFlag{
+			Name:    "base-url",
+			Aliases: []string{"u"},
+		},
+		&cli.StringFlag{
 			Name:     "s3-bucket",
 			Aliases:  []string{"b"},
 			Required: true,
@@ -68,6 +72,7 @@ func main() {
 
 		cfg := &imgconv.Config{
 			Region:        c.String("region"),
+			BaseURL:       c.String("base-url"),
 			S3Bucket:      c.String("s3-bucket"),
 			S3DestKeyBase: c.String("s3-dest-key-base"),
 			S3SrcKeyBase:  c.String("s3-src-key-base"),
@@ -78,7 +83,7 @@ func main() {
 
 		path := c.Args().Get(0)
 
-		env := imgconv.NewEnvironment(cfg)
+		env := imgconv.NewEnvironment(c.Context, cfg)
 
 		if err := env.Convert(c.Context, path); err != nil {
 			return fmt.Errorf("failed to convert: %s", path)
