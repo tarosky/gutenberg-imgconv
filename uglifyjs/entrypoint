@@ -9,5 +9,5 @@ version="$2"
 exec_name="$3"
 output_dir="$4"
 
-npm install "$package@$version" --no-cache
+npm install --no-update-notifier "$package@$version" --no-cache
 exec nexe "node_modules/$package/bin/$exec_name" -o "$output_dir" -r "node_modules/$package/**"

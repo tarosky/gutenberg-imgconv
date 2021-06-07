@@ -92,8 +92,6 @@ func createAWSConfig(ctx context.Context, cfg *Config) *aws.Config {
 		panic(err)
 	}
 
-	// awsCfg.Retryer = retry.NewStandard()
-
 	if cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" {
 		awsCfg.Credentials = credentials.NewStaticCredentialsProvider(
 			cfg.AccessKeyID, cfg.SecretAccessKey, "")

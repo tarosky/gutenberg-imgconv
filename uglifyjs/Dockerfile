@@ -4,7 +4,7 @@ FROM node:$nodejs_version-stretch
 ARG uid
 ARG gid
 
-RUN npm install -g nexe
+RUN npm install --no-update-notifier -g nexe
 
 COPY uglifyjs/entrypoint /entrypoint
 
