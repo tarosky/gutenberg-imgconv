@@ -135,9 +135,18 @@ func NewEnvironment(ctx context.Context, cfg *Config) *Environment {
 }
 
 type task struct {
+	Bucket        string `json:"bucket"`
 	Path          string `json:"path"`
 	messageID     string
 	receiptHandle string
+}
+
+// GetSourceBucket gets source bucket.
+func (e *Environment) GetSourceBucket(bucket string) string {
+	if bucket == "" {
+		return e.S3Bucket
+	}
+	return bucket
 }
 
 func (e *Environment) worker(
@@ -162,9 +171,10 @@ func (e *Environment) worker(
 			}
 			e.log.Debug("received task",
 				idField,
+				zap.String("bucket", t.Bucket),
 				zap.String("path", t.Path),
 				zap.String("message-id", t.messageID))
-			if err := e.Convert(ctx, t.Path); err != nil {
+			if err := e.Convert(ctx, e.GetSourceBucket(t.Bucket), t.Path); err != nil {
 				// Error level message is output in Convert function
 				e.log.Debug("conversion finished",
 					idField,
@@ -225,6 +235,7 @@ func (e *Environment) retriever(ctx context.Context, id string, outputCh chan<- 
 
 				e.log.Debug("retrieved message",
 					idField,
+					zap.String("bucket", t.Bucket),
 					zap.String("path", t.Path),
 					zap.String("message-id", t.messageID))
 
@@ -268,6 +279,7 @@ func (e *Environment) deleteMessages(
 			zap.String("code", *f.Code),
 			zap.String("message", *f.Message),
 			zap.Bool("sender-fault", f.SenderFault),
+			zap.String("bucket", tasks[i].Bucket),
 			zap.String("path", tasks[i].Path),
 		)
 	}
@@ -302,7 +314,10 @@ func (e *Environment) deleter(ctx context.Context, id string, workersToDeletersC
 				return
 			}
 
-			e.log.Debug("got new task", idField, zap.String("path", t.Path))
+			e.log.Debug("got new task",
+				idField,
+				zap.String("bucket", t.Bucket),
+				zap.String("path", t.Path))
 			id := strconv.Itoa(len(entries))
 			entries = append(entries, sqstypes.DeleteMessageBatchRequestEntry{
 				Id:            &id,
@@ -350,6 +365,7 @@ func (e *Environment) retrieverFanIn(ctx context.Context, retrieverHubToWorkersC
 		case task := <-retrieversToHubCh:
 			if _, ok := retrievedIDs[task.messageID]; ok {
 				e.log.Debug("duplicate message found",
+					zap.String("bucket", task.Bucket),
 					zap.String("path", task.Path),
 					zap.String("message-id", task.messageID))
 			} else {

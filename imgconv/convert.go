@@ -35,6 +35,7 @@ const (
 	sourceMapContentType  = "application/octet-stream"
 
 	timestampMetadata = "original-timestamp"
+	bucketMetadata    = "original-bucket"
 	pathMetadata      = "original-path"
 )
 
@@ -60,12 +61,13 @@ func (w *atOnceWriter) Bytes() []byte {
 }
 
 // Convert converts an image at specified S3 key into WebP
-func (e *Environment) Convert(ctx context.Context, path string) error {
+func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
+	zapBucketField := zap.String("bucket", bucket)
 	zapPathField := zap.String("path", path)
 
-	sourceObject := func(ctx context.Context, path string) (*s3.GetObjectOutput, error) {
+	sourceObject := func(ctx context.Context, bucket, path string) (*s3.GetObjectOutput, error) {
 		res, err := e.S3Client.GetObject(ctx, &s3.GetObjectInput{
-			Bucket: &e.S3Bucket,
+			Bucket: &bucket,
 			Key:    aws.String(filepath.Join(e.S3SrcKeyBase, path)),
 		})
 		if err != nil {
@@ -77,18 +79,23 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 			var apiErr smithy.APIError
 			if errors.As(err, &apiErr) {
 				e.log.Error("failed to GET object",
+					zapBucketField,
 					zapPathField,
 					zap.String("aws-code", apiErr.ErrorCode()),
 					zap.String("aws-message", apiErr.ErrorMessage()))
 				return nil, err
 			}
 
-			e.log.Error("failed to connect to AWS", zapPathField, zap.Error(err))
+			e.log.Error("failed to connect to AWS",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
 			return nil, err
 		}
 
 		if e.MaxFileSize < res.ContentLength {
 			e.log.Warn("file is larger than predefined limit",
+				zapBucketField,
 				zapPathField,
 				zap.Int64("size", res.ContentLength),
 				zap.Int64("max-file-size", e.MaxFileSize))
@@ -119,6 +126,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		file, err := os.Open(filePath)
 		if err != nil {
 			e.log.Error("failed to open file",
+				zapBucketField,
 				zapPathField,
 				zap.Error(err),
 				zap.String("filepath", filePath),
@@ -129,6 +137,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		cleanup := func() {
 			if err := file.Close(); err != nil {
 				e.log.Error("failed to close opened file",
+					zapBucketField,
 					zapPathField,
 					zap.Error(err),
 					zap.String("filepath", filePath),
@@ -142,13 +151,17 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 	createTempDir := func() (string, func(), error) {
 		tempDir, err := ioutil.TempDir("", "")
 		if err != nil {
-			e.log.Error("failed to create temp dir", zapPathField, zap.Error(err))
+			e.log.Error("failed to create temp dir",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
 			return "", nil, err
 		}
 
 		return tempDir, func() {
 			if err := os.RemoveAll(tempDir); err != nil {
 				e.log.Error("failed to remove tempdir",
+					zapBucketField,
 					zapPathField,
 					zap.Error(err),
 					zap.String("dirpath", tempDir),
@@ -170,7 +183,10 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 				Bucket: &e.S3Bucket,
 				Key:    &s3key,
 			}); err != nil {
-				e.log.Error("unable to DELETE S3 object", zapPathField, zap.Error(err))
+				e.log.Error("unable to DELETE S3 object",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
 				return 0, err
 			}
 
@@ -182,13 +198,19 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		timestamp := srcObj.Metadata[timestampMetadata]
 		if timestamp == "" {
-			e.log.Error("no timestamp", zapPathField, zap.String("s3key", s3key))
+			e.log.Error("no timestamp",
+				zapBucketField,
+				zapPathField,
+				zap.String("s3key", s3key))
 			return 0, fmt.Errorf("no timestamp: %s", s3key)
 		}
 
 		afterSize, err := seekerLen(body)
 		if err != nil {
-			e.log.Error("failed to seek", zapPathField, zap.String("s3key", s3key))
+			e.log.Error("failed to seek",
+				zapBucketField,
+				zapPathField,
+				zap.String("s3key", s3key))
 			return 0, err
 		}
 
@@ -199,11 +221,15 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 			Key:          &s3key,
 			StorageClass: e.S3StorageClass,
 			Metadata: map[string]string{
+				bucketMetadata:    bucket,
 				pathMetadata:      path,
 				timestampMetadata: timestamp,
 			},
 		}); err != nil {
-			e.log.Error("unable to PUT to S3", zapPathField, zap.Error(err))
+			e.log.Error("unable to PUT to S3",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
 			return 0, err
 		}
 
@@ -218,7 +244,10 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		img, _, err := image.Decode(srcObj.Body)
 		if err != nil {
-			e.log.Error("failed to decode image", zapPathField, zap.Error(err))
+			e.log.Error("failed to decode image",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
 			return nil, err
 		}
 
@@ -249,6 +278,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		if size != 0 {
 			e.log.Info("converted",
+				zapBucketField,
 				zapPathField,
 				zap.Int64("before", srcObj.ContentLength),
 				zap.Int64("after", size))
@@ -259,17 +289,26 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 	saveOriginalJSToFile := func(srcPath string, srcBody io.Reader) error {
 		file, err := os.Create(srcPath)
 		if err != nil {
-			e.log.Error("failed to create temporary file", zapPathField, zap.Error(err))
+			e.log.Error("failed to create temporary file",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
 			return err
 		}
 		defer func() {
 			if err := file.Close(); err != nil {
-				e.log.Error("failed to close copied JS file", zapPathField, zap.Error(err))
+				e.log.Error("failed to close copied JS file",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
 			}
 		}()
 
 		if _, err := io.Copy(file, srcBody); err != nil {
-			e.log.Error("failed to save original JS file", zapPathField, zap.Error(err))
+			e.log.Error("failed to save original JS file",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
 			return err
 		}
 		return nil
@@ -308,6 +347,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		if err := cmd.Run(); err != nil {
 			e.log.Error("failed to run uglifyjs",
+				zapBucketField,
 				zapPathField,
 				zap.Error(err),
 				zap.String("stderr", stderrBuf.String()),
@@ -338,6 +378,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		if size != 0 {
 			e.log.Info("JavaScript minified",
+				zapBucketField,
 				zapPathField,
 				zap.String("s3key", key),
 				zap.Int64("before", srcObj.ContentLength),
@@ -366,6 +407,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		if size != 0 {
 			e.log.Info("source map generated",
+				zapBucketField,
 				zapPathField,
 				zap.String("s3key", key),
 				zap.Int64("size", size))
@@ -422,6 +464,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 
 		if size != 0 {
 			e.log.Info("CSS minified",
+				zapBucketField,
 				zapPathField,
 				zap.String("s3key", key),
 				zap.Int64("before", srcObj.ContentLength),
@@ -434,6 +477,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		file, err := os.Create(minifiedCSSPath)
 		if err != nil {
 			e.log.Error("failed to create temporary file",
+				zapBucketField,
 				zapPathField,
 				zap.Error(err),
 				zap.String("filepath", minifiedCSSPath))
@@ -441,12 +485,16 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		}
 		defer func() {
 			if err := file.Close(); err != nil {
-				e.log.Error("failed to close copied CSS file", zapPathField, zap.Error(err))
+				e.log.Error("failed to close copied CSS file",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
 			}
 		}()
 
 		if err := e.minifyCSS(file, body, map[string]string{}); err != nil {
 			e.log.Error("failed to minify CSS",
+				zapBucketField,
 				zapPathField,
 				zap.Error(err))
 			return err
@@ -474,14 +522,17 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 		return updateMinifiedCSSS3Object(ctx, srcObj, minifiedCSSPath)
 	}
 
-	srcObj, err := sourceObject(ctx, path)
+	srcObj, err := sourceObject(ctx, bucket, path)
 	if err != nil {
 		return err
 	}
 	if srcObj != nil {
 		defer func() {
 			if err := srcObj.Body.Close(); err != nil {
-				e.log.Error("failed to close original S3 object", zapPathField, zap.Error(err))
+				e.log.Error("failed to close original S3 object",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
 			}
 		}()
 	}
@@ -494,7 +545,9 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 	case ".css":
 		return minifyCSS(ctx, srcObj)
 	default:
-		e.log.Error("unknown file type", zapPathField)
+		e.log.Error("unknown file type",
+			zapBucketField,
+			zapPathField)
 		return fmt.Errorf("unkown file type: %s", path)
 	}
 }

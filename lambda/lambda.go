@@ -16,7 +16,8 @@ import (
 // Task is used to convert specific image directly.
 // Empty Path field means this execution is a regular cron job.
 type Task struct {
-	Path string `json:"path"`
+	Bucket string `json:"bucket"`
+	Path   string `json:"path"`
 }
 
 var env *imgconv.Environment
@@ -24,7 +25,7 @@ var env *imgconv.Environment
 // HandleRequest handles requests from Lambda environment.
 func HandleRequest(ctx context.Context, task Task) error {
 	if task.Path != "" {
-		if err := env.Convert(ctx, task.Path); err != nil {
+		if err := env.Convert(ctx, env.GetSourceBucket(task.Bucket), task.Path); err != nil {
 			return fmt.Errorf("image conversion failed")
 		}
 		return nil
