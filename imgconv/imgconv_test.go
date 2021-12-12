@@ -57,7 +57,7 @@ func (s *ConvertSQSSuite) isSQSEmpty() bool {
 	})
 	s.Require().NoError(err)
 
-	return 0 == len(res.Messages)
+	return len(res.Messages) == 0
 }
 
 func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount int) {

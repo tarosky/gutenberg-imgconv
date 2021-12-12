@@ -14,8 +14,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/tdewolff/minify/v2"
 	"github.com/tdewolff/minify/v2/css"
 	"go.uber.org/zap"
@@ -31,6 +32,7 @@ type Config struct {
 	S3Bucket             string
 	S3SrcKeyBase         string
 	S3DestKeyBase        string
+	S3StorageClass       s3types.StorageClass
 	SQSQueueURL          string
 	SQSVisibilityTimeout uint
 	MaxFileSize          int64
@@ -134,7 +136,6 @@ func NewEnvironment(ctx context.Context, cfg *Config) *Environment {
 
 type task struct {
 	Path          string `json:"path"`
-	succeeded     bool
 	messageID     string
 	receiptHandle string
 }
@@ -235,7 +236,7 @@ func (e *Environment) retriever(ctx context.Context, id string, outputCh chan<- 
 
 func (e *Environment) deleteMessages(
 	ctx context.Context,
-	entries []types.DeleteMessageBatchRequestEntry,
+	entries []sqstypes.DeleteMessageBatchRequestEntry,
 	tasks []*task,
 ) {
 	res, err := e.SQSClient.DeleteMessageBatch(
@@ -273,7 +274,7 @@ func (e *Environment) deleteMessages(
 }
 
 func (e *Environment) deleter(ctx context.Context, id string, workersToDeletersCh <-chan *task) {
-	entries := make([]types.DeleteMessageBatchRequestEntry, 0, 10)
+	entries := make([]sqstypes.DeleteMessageBatchRequestEntry, 0, 10)
 	tasks := make([]*task, 0, 10)
 	idField := zap.String("id", id)
 
@@ -303,7 +304,7 @@ func (e *Environment) deleter(ctx context.Context, id string, workersToDeletersC
 
 			e.log.Debug("got new task", idField, zap.String("path", t.Path))
 			id := strconv.Itoa(len(entries))
-			entries = append(entries, types.DeleteMessageBatchRequestEntry{
+			entries = append(entries, sqstypes.DeleteMessageBatchRequestEntry{
 				Id:            &id,
 				ReceiptHandle: &t.receiptHandle,
 			})

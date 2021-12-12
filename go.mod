@@ -1,6 +1,6 @@
 module github.com/tarosky/gutenberg-imgconv
 
-go 1.15
+go 1.16
 
 require (
 	github.com/alecthomas/units v0.0.0-20210208195552-ff826a37aa15

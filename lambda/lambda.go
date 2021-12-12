@@ -9,6 +9,7 @@ import (
 
 	"github.com/alecthomas/units"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
 )
 
@@ -34,9 +35,9 @@ func HandleRequest(ctx context.Context, task Task) error {
 	return nil
 }
 
-func getEnv(key, fallback string) string {
+func getEnvStorageClass(key string, fallback types.StorageClass) types.StorageClass {
 	if value, ok := os.LookupEnv(key); ok {
-		return value
+		return types.StorageClass(value)
 	}
 	return fallback
 }
@@ -96,8 +97,9 @@ func main() {
 		Region:               os.Getenv("AWS_REGION"),
 		BaseURL:              os.Getenv("BASE_URL"),
 		S3Bucket:             os.Getenv("S3_BUCKET"),
-		S3SrcKeyBase:         os.Getenv("S3_SRC_KEY_BASE"),
 		S3DestKeyBase:        os.Getenv("S3_DEST_KEY_BASE"),
+		S3SrcKeyBase:         os.Getenv("S3_SRC_KEY_BASE"),
+		S3StorageClass:       getEnvStorageClass("S3_STORAGE_CLASS", types.StorageClassStandard),
 		SQSQueueURL:          os.Getenv("SQS_QUEUE_URL"),
 		SQSVisibilityTimeout: getEnvUint("SQS_VISIBILITY_TIMEOUT", 300),
 		MaxFileSize:          getEnvFileSize("MAX_FILE_SIZE", "100MiB"),
