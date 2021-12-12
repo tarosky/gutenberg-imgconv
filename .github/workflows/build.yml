@@ -14,7 +14,7 @@ env:
   ACCESS_KEY_ID: AKIAQGFE5ESVOYCL2ANC
   AWS_ACCOUNT_ID: '013230744746'
   S3_BUCKET: gutenberg-modrepo-testbucket-66i59vgigq34
-  GO_VERSION: 1.15.8
+  GO_VERSION: 1.16.10
 
 jobs:
   build-go:
