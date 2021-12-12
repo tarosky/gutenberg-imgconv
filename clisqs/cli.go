@@ -5,41 +5,10 @@ import (
 	"os"
 
 	"github.com/alecthomas/units"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
 	"github.com/urfave/cli/v2"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
-
-func createLogger() *zap.Logger {
-	config := &zap.Config{
-		Level:            zap.NewAtomicLevelAt(zap.DebugLevel),
-		Development:      true,
-		Encoding:         "json",
-		OutputPaths:      []string{"stderr"},
-		ErrorOutputPaths: []string{"stderr"},
-		EncoderConfig: zapcore.EncoderConfig{
-			TimeKey:        "time",
-			LevelKey:       "level",
-			NameKey:        zapcore.OmitKey,
-			CallerKey:      zapcore.OmitKey,
-			FunctionKey:    zapcore.OmitKey,
-			MessageKey:     "message",
-			StacktraceKey:  zapcore.OmitKey,
-			LineEnding:     zapcore.DefaultLineEnding,
-			EncodeLevel:    zapcore.CapitalLevelEncoder,
-			EncodeTime:     zapcore.ISO8601TimeEncoder,
-			EncodeDuration: zapcore.StringDurationEncoder,
-			EncodeCaller:   zapcore.ShortCallerEncoder,
-		},
-	}
-	log, err := config.Build(zap.WithCaller(false))
-	if err != nil {
-		panic("failed to initialize logger")
-	}
-
-	return log
-}
 
 func main() {
 	app := cli.NewApp()
@@ -65,6 +34,11 @@ func main() {
 			Name:     "s3-dest-key-base",
 			Aliases:  []string{"dk"},
 			Required: true,
+		},
+		&cli.StringFlag{
+			Name:    "s3-storage-class",
+			Aliases: []string{"sc"},
+			Value:   string(types.StorageClassStandard),
 		},
 		&cli.StringFlag{
 			Name:     "sqs-queue-url",
@@ -117,8 +91,9 @@ func main() {
 			Region:               c.String("region"),
 			BaseURL:              c.String("base-url"),
 			S3Bucket:             c.String("s3-bucket"),
-			S3SrcKeyBase:         c.String("s3-src-key-base"),
 			S3DestKeyBase:        c.String("s3-dest-key-base"),
+			S3SrcKeyBase:         c.String("s3-src-key-base"),
+			S3StorageClass:       types.StorageClass(c.String("s3-storage-class")),
 			SQSQueueURL:          c.String("sqs-queue-url"),
 			SQSVisibilityTimeout: c.Uint("sqs-vilibility-timeout"),
 			MaxFileSize:          fsize,

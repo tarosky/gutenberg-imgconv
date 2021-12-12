@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -147,7 +146,7 @@ func copy(ctx context.Context, src, dst string, s *TestSuite) {
 			Bucket:       &s.env.S3Bucket,
 			Key:          &dst,
 			Body:         in,
-			StorageClass: types.StorageClassStandardIa,
+			StorageClass: s.env.S3StorageClass,
 			Metadata: map[string]string{
 				pathMetadata:      src,
 				timestampMetadata: info.ModTime().UTC().Format(time.RFC3339Nano),

@@ -28,11 +28,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type fileInfo struct {
-	info os.FileInfo
-	err  error
-}
-
 const (
 	webPContentType       = "image/webp"
 	javaScriptContentType = "text/javascript"
@@ -202,7 +197,7 @@ func (e *Environment) Convert(ctx context.Context, path string) error {
 			Bucket:       &e.S3Bucket,
 			ContentType:  &contentType,
 			Key:          &s3key,
-			StorageClass: types.StorageClassStandardIa,
+			StorageClass: e.S3StorageClass,
 			Metadata: map[string]string{
 				pathMetadata:      path,
 				timestampMetadata: timestamp,

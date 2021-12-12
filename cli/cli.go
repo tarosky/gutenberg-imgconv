@@ -5,19 +5,10 @@ import (
 	"os"
 
 	"github.com/alecthomas/units"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/tarosky/gutenberg-imgconv/imgconv"
 	"github.com/urfave/cli/v2"
-	"go.uber.org/zap"
 )
-
-func createLogger() *zap.Logger {
-	log, err := zap.NewDevelopment(zap.WithCaller(false))
-	if err != nil {
-		panic("failed to initialize logger")
-	}
-
-	return log
-}
 
 func main() {
 	app := cli.NewApp()
@@ -49,6 +40,11 @@ func main() {
 			Required: true,
 		},
 		&cli.StringFlag{
+			Name:    "s3-storage-class",
+			Aliases: []string{"sc"},
+			Value:   string(types.StorageClassStandard),
+		},
+		&cli.StringFlag{
 			Name:    "max-file-size",
 			Aliases: []string{"s"},
 			Value:   "20MiB",
@@ -71,14 +67,15 @@ func main() {
 		}
 
 		cfg := &imgconv.Config{
-			Region:        c.String("region"),
-			BaseURL:       c.String("base-url"),
-			S3Bucket:      c.String("s3-bucket"),
-			S3DestKeyBase: c.String("s3-dest-key-base"),
-			S3SrcKeyBase:  c.String("s3-src-key-base"),
-			MaxFileSize:   fsize,
-			WebPQuality:   uint8(c.Uint("webp-quality")),
-			Log:           log,
+			Region:         c.String("region"),
+			BaseURL:        c.String("base-url"),
+			S3Bucket:       c.String("s3-bucket"),
+			S3DestKeyBase:  c.String("s3-dest-key-base"),
+			S3SrcKeyBase:   c.String("s3-src-key-base"),
+			S3StorageClass: types.StorageClass(c.String("s3-storage-class")),
+			MaxFileSize:    fsize,
+			WebPQuality:    uint8(c.Uint("webp-quality")),
+			Log:            log,
 		}
 
 		path := c.Args().Get(0)
