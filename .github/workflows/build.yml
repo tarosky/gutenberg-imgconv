@@ -74,6 +74,10 @@ jobs:
     - run: go get -u github.com/jstemmer/go-junit-report
     - run: go test -v ./imgconv 2>&1 | tee work/test.log
     - run: go-junit-report < work/test.log > work/report.xml
+    - uses: actions/upload-artifact@v2
+      with:
+        name: report.xml
+        path: work/report.xml
     - name: Publish Unit Test Results
       uses: EnricoMi/publish-unit-test-result-action@v1
       if: always()
