@@ -74,6 +74,10 @@ jobs:
     - run: go get -u github.com/jstemmer/go-junit-report
     - run: go test -v ./imgconv 2>&1 | tee work/test.log
     - run: go-junit-report < work/test.log > work/report.xml
+    - uses: actions/upload-artifact@v2
+      with:
+        name: report.xml
+        path: work/report.xml
     - name: Publish Unit Test Results
       uses: EnricoMi/publish-unit-test-result-action@v1
       if: always()
@@ -136,4 +140,4 @@ jobs:
         aws-access-key-id: ${{env.RELEASE_ACCESS_KEY_ID}}
         aws-secret-access-key: ${{secrets.AWS_RELEASE_SECRET_ACCESS_KEY}}
         aws-region: ap-northeast-1
-    - run: aws s3 cp ./imgconv.zip s3://$REPO_BUCKET/imgconv/imgconv.build-$BUILD_NUMBER-awslambda-go1x.zip
+    - run: aws s3 cp ./imgconv.zip s3://$REPO_BUCKET/imgconv.build-$BUILD_NUMBER-awslambda-go1x.zip
