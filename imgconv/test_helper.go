@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -77,6 +78,7 @@ func getTestConfig(name string) *Config {
 		S3Bucket:             readTestConfig("s3-bucket"),
 		S3SrcKeyBase:         s3SrcPath,
 		S3DestKeyBase:        generateSafeRandomString() + "/" + name,
+		S3StorageClass:       types.StorageClassStandard,
 		SQSQueueURL:          sqsURL,
 		SQSVisibilityTimeout: 2,
 		MaxFileSize:          10 * 1024 * 1024,
@@ -113,7 +115,10 @@ func initTestSuite(name string, t require.TestingT) *TestSuite {
 	require.NoError(t, os.RemoveAll("work/test/"+name), "failed to remove directory")
 	ctx := context.Background()
 
-	return &TestSuite{ctx: ctx}
+	return &TestSuite{
+		ctx:                 ctx,
+		s3OtherSourceBucket: readTestConfig("s3-other-source-bucket"),
+	}
 }
 
 func cleanTestEnvironment(ctx context.Context, s *TestSuite) {
@@ -127,11 +132,12 @@ func cleanTestEnvironment(ctx context.Context, s *TestSuite) {
 // TestSuite holds configs and sessions required to execute program.
 type TestSuite struct {
 	suite.Suite
-	env *Environment
-	ctx context.Context
+	env                 *Environment
+	ctx                 context.Context
+	s3OtherSourceBucket string
 }
 
-func copy(ctx context.Context, src, dst string, s *TestSuite) {
+func copy(ctx context.Context, src, bucket, key string, s *TestSuite) {
 	in, err := os.Open(src)
 	s.Require().NoError(err)
 	defer func() {
@@ -143,8 +149,8 @@ func copy(ctx context.Context, src, dst string, s *TestSuite) {
 
 	{
 		_, err := s.env.S3Client.PutObject(ctx, &s3.PutObjectInput{
-			Bucket:       &s.env.S3Bucket,
-			Key:          &dst,
+			Bucket:       &bucket,
+			Key:          &key,
 			Body:         in,
 			StorageClass: s.env.S3StorageClass,
 			Metadata: map[string]string{

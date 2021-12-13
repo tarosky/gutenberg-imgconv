@@ -49,7 +49,7 @@ func (s *ConvertSQSSuite) sendSQSMessages(entries []types.SendMessageBatchReques
 }
 
 func (s *ConvertSQSSuite) isSQSEmpty() bool {
-	time.Sleep(time.Duration(s.env.SQSVisibilityTimeout) * time.Second)
+	time.Sleep(time.Duration(s.env.SQSVisibilityTimeout+1) * time.Second)
 
 	res, err := s.env.SQSClient.ReceiveMessage(s.ctx, &sqs.ReceiveMessageInput{
 		WaitTimeSeconds: 1,
@@ -89,7 +89,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 		i := i
 		eg.Go(func() error {
 			path := fmt.Sprintf("dir/image%03d.jpg", i)
-			copy(ctx, sampleJPEG, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
+			copy(ctx, sampleJPEG, s.env.S3Bucket, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
 			jb, err := json.Marshal(&task{Path: path})
 			s.Require().NoError(err)
 			mb := string(jb)
@@ -106,8 +106,11 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 		i := i
 		eg.Go(func() error {
 			path := fmt.Sprintf("dir/image%03d.png", i)
-			copy(ctx, samplePNG, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
-			jb, err := json.Marshal(&task{Path: path})
+			copy(ctx, samplePNG, s.s3OtherSourceBucket, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
+			jb, err := json.Marshal(&task{
+				Bucket: s.s3OtherSourceBucket,
+				Path:   path,
+			})
 			s.Require().NoError(err)
 			mb := string(jb)
 			id := "png-" + strconv.Itoa(i)
