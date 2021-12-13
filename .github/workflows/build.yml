@@ -136,4 +136,4 @@ jobs:
         aws-access-key-id: ${{env.RELEASE_ACCESS_KEY_ID}}
         aws-secret-access-key: ${{secrets.AWS_RELEASE_SECRET_ACCESS_KEY}}
         aws-region: ap-northeast-1
-    - run: aws s3 cp ./imgconv.zip s3://$REPO_BUCKET/imgconv/imgconv.build-$BUILD_NUMBER-awslambda-go1x.zip
+    - run: aws s3 cp ./imgconv.zip s3://$REPO_BUCKET/imgconv.build-$BUILD_NUMBER-awslambda-go1x.zip
