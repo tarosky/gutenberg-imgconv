@@ -49,7 +49,7 @@ func (s *ConvertSQSSuite) sendSQSMessages(entries []types.SendMessageBatchReques
 }
 
 func (s *ConvertSQSSuite) isSQSEmpty() bool {
-	time.Sleep(time.Duration(s.env.SQSVisibilityTimeout) * time.Second)
+	time.Sleep(time.Duration(s.env.SQSVisibilityTimeout+1) * time.Second)
 
 	res, err := s.env.SQSClient.ReceiveMessage(s.ctx, &sqs.ReceiveMessageInput{
 		WaitTimeSeconds: 1,
