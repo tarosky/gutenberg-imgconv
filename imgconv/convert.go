@@ -19,7 +19,6 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -37,6 +36,8 @@ const (
 	timestampMetadata = "original-timestamp"
 	bucketMetadata    = "original-bucket"
 	pathMetadata      = "original-path"
+
+	timestampLayout = "2006-01-02T15:04:05.999Z07:00"
 )
 
 // atOnceWriter is used to avoid memory copy.
@@ -60,15 +61,18 @@ func (w *atOnceWriter) Bytes() []byte {
 	return w.p
 }
 
-// Convert converts an image at specified S3 key into WebP
+// Convert converts an image to WebP
 func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 	zapBucketField := zap.String("bucket", bucket)
 	zapPathField := zap.String("path", path)
 
-	sourceObject := func(ctx context.Context, bucket, path string) (*s3.GetObjectOutput, error) {
+	sourceBucket := e.getSourceBucket(bucket)
+	sourceKey := e.getSourceKey(bucket, path)
+
+	sourceObject := func(ctx context.Context) (*s3.GetObjectOutput, error) {
 		res, err := e.S3Client.GetObject(ctx, &s3.GetObjectInput{
-			Bucket: &bucket,
-			Key:    aws.String(filepath.Join(e.S3SrcKeyBase, path)),
+			Bucket: &sourceBucket,
+			Key:    &sourceKey,
 		})
 		if err != nil {
 			var noSuchKeyError *types.NoSuchKey
@@ -170,6 +174,14 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 		}, nil
 	}
 
+	getTimestamp := func(srcObj *s3.GetObjectOutput) string {
+		if bucket == "" {
+			return srcObj.Metadata[timestampMetadata]
+		}
+
+		return srcObj.LastModified.UTC().Format(timestampLayout)
+	}
+
 	updateS3Object := func(
 		ctx context.Context,
 		srcObj *s3.GetObjectOutput,
@@ -190,13 +202,13 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 				return 0, err
 			}
 
-			e.log.Info("deleted removed file",
+			e.log.Info("reflected deletion",
 				zapPathField,
 				zap.String("s3key", s3key))
 			return 0, nil
 		}
 
-		timestamp := srcObj.Metadata[timestampMetadata]
+		timestamp := getTimestamp(srcObj)
 		if timestamp == "" {
 			e.log.Error("no timestamp",
 				zapBucketField,
@@ -522,7 +534,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 		return updateMinifiedCSSS3Object(ctx, srcObj, minifiedCSSPath)
 	}
 
-	srcObj, err := sourceObject(ctx, bucket, path)
+	srcObj, err := sourceObject(ctx)
 	if err != nil {
 		return err
 	}
