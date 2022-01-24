@@ -155,8 +155,26 @@ func copy(ctx context.Context, src, bucket, key string, s *TestSuite) {
 			StorageClass: s.env.S3StorageClass,
 			Metadata: map[string]string{
 				pathMetadata:      src,
-				timestampMetadata: info.ModTime().UTC().Format(time.RFC3339Nano),
+				timestampMetadata: info.ModTime().UTC().Format(timestampLayout),
 			},
+		})
+		s.Require().NoError(err)
+	}
+}
+
+func copyAsOtherSource(ctx context.Context, src, bucket, key string, s *TestSuite) {
+	in, err := os.Open(src)
+	s.Require().NoError(err)
+	defer func() {
+		s.Require().NoError(in.Close())
+	}()
+
+	{
+		_, err := s.env.S3Client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket:       &bucket,
+			Key:          &key,
+			Body:         in,
+			StorageClass: types.StorageClassStandard,
 		})
 		s.Require().NoError(err)
 	}

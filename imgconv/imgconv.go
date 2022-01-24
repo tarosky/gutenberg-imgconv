@@ -141,12 +141,18 @@ type task struct {
 	receiptHandle string
 }
 
-// GetSourceBucket gets source bucket.
-func (e *Environment) GetSourceBucket(bucket string) string {
+func (e *Environment) getSourceBucket(bucket string) string {
 	if bucket == "" {
 		return e.S3Bucket
 	}
 	return bucket
+}
+
+func (e *Environment) getSourceKey(bucket, path string) string {
+	if bucket == "" {
+		return filepath.Join(e.S3SrcKeyBase, path)
+	}
+	return path
 }
 
 func (e *Environment) worker(
@@ -174,7 +180,7 @@ func (e *Environment) worker(
 				zap.String("bucket", t.Bucket),
 				zap.String("path", t.Path),
 				zap.String("message-id", t.messageID))
-			if err := e.Convert(ctx, e.GetSourceBucket(t.Bucket), t.Path); err != nil {
+			if err := e.Convert(ctx, t.Bucket, t.Path); err != nil {
 				// Error level message is output in Convert function
 				e.log.Debug("conversion finished",
 					idField,

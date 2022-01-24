@@ -25,7 +25,7 @@ var env *imgconv.Environment
 // HandleRequest handles requests from Lambda environment.
 func HandleRequest(ctx context.Context, task Task) error {
 	if task.Path != "" {
-		if err := env.Convert(ctx, env.GetSourceBucket(task.Bucket), task.Path); err != nil {
+		if err := env.Convert(ctx, task.Bucket, task.Path); err != nil {
 			return fmt.Errorf("image conversion failed")
 		}
 		return nil

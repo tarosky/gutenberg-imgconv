@@ -105,8 +105,8 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 	for i := 0; i < pngCount; i++ {
 		i := i
 		eg.Go(func() error {
-			path := fmt.Sprintf("dir/image%03d.png", i)
-			copy(ctx, samplePNG, s.s3OtherSourceBucket, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
+			path := s.env.S3SrcKeyBase + fmt.Sprintf("dir/image%03d.png", i)
+			copyAsOtherSource(ctx, samplePNG, s.s3OtherSourceBucket, path, s.TestSuite)
 			jb, err := json.Marshal(&task{
 				Bucket: s.s3OtherSourceBucket,
 				Path:   path,
