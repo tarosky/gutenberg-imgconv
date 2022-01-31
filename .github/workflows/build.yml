@@ -38,7 +38,7 @@ jobs:
     - run: echo "$TEST_SECRET_ACCESS_KEY" > config/test/secret-access-key
       env:
         TEST_SECRET_ACCESS_KEY: ${{secrets.AWS_TEST_SECRET_ACCESS_KEY}}
-    - run: apt install -y gcc
+    - run: sudo apt-get install -y gcc
     - run: go get github.com/ahmetb/govvv
     - name: Generate build number
       uses: einaregilsson/build-number@v3
