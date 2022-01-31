@@ -8,10 +8,12 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -61,23 +63,23 @@ func generateSafeRandomString() string {
 	return base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(v)
 }
 
-func getTestConfig(name string) *Config {
+func getTestConfig(name, logPath string) *Config {
 	region := "ap-northeast-1"
 	sqsName := "test-" + name + "-" + generateSafeRandomString()
 	sqsURL := fmt.Sprintf("https://sqs.%s.amazonaws.com/%s/%s",
 		region,
 		readTestConfig("aws-account-id"),
 		sqsName)
-	s3SrcPath := fmt.Sprintf("work/test/%s/%s", name, generateSafeRandomString())
+
+	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+		panic(err)
+	}
 
 	return &Config{
 		Region:               region,
 		AccessKeyID:          readTestConfig("access-key-id"),
 		SecretAccessKey:      readTestConfig("secret-access-key"),
 		BaseURL:              "https://example.com",
-		S3Bucket:             readTestConfig("s3-bucket"),
-		S3SrcKeyBase:         s3SrcPath,
-		S3DestKeyBase:        generateSafeRandomString() + "/" + name,
 		S3StorageClass:       types.StorageClassStandard,
 		SQSQueueURL:          sqsURL,
 		SQSVisibilityTimeout: 2,
@@ -88,7 +90,7 @@ func getTestConfig(name string) *Config {
 		DeleterCount:         2,
 		OrderStop:            30 * time.Second,
 		UglifyJSPath:         "work/uglifyjs",
-		Log:                  CreateLogger(),
+		Log:                  CreateLogger([]string{"stderr", logPath}),
 	}
 }
 
@@ -98,12 +100,20 @@ func getTestSQSQueueNameFromURL(url string) string {
 }
 
 func newTestEnvironment(ctx context.Context, name string, s *TestSuite) *Environment {
-	e := NewEnvironment(ctx, getTestConfig(name))
+	s.logPath = fmt.Sprintf("work/test/%s/%s/output.log", name, generateSafeRandomString())
+	s.s3Src = Location{
+		Bucket: readTestConfig("s3-src-bucket"),
+		Prefix: generateSafeRandomString() + "/" + name + "/",
+	}
+	s.s3Dest = Location{
+		Bucket: readTestConfig("s3-dest-bucket"),
+		Prefix: generateSafeRandomString() + "/" + name + "/",
+	}
 
-	sqsName := getTestSQSQueueNameFromURL(e.SQSQueueURL)
+	e := NewEnvironment(ctx, getTestConfig(name, s.logPath))
 
 	_, err := e.SQSClient.CreateQueue(s.ctx, &sqs.CreateQueueInput{
-		QueueName: &sqsName,
+		QueueName: aws.String(getTestSQSQueueNameFromURL(e.SQSQueueURL)),
 	})
 	require.NoError(s.T(), err, "failed to create SQS queue")
 
@@ -117,7 +127,8 @@ func initTestSuite(name string, t require.TestingT) *TestSuite {
 
 	return &TestSuite{
 		ctx:                 ctx,
-		s3OtherSourceBucket: readTestConfig("s3-other-source-bucket"),
+		s3AnotherSrcBucket:  readTestConfig("s3-another-src-bucket"),
+		s3AnotherDestBucket: readTestConfig("s3-another-dest-bucket"),
 	}
 }
 
@@ -134,7 +145,18 @@ type TestSuite struct {
 	suite.Suite
 	env                 *Environment
 	ctx                 context.Context
-	s3OtherSourceBucket string
+	s3AnotherSrcBucket  string
+	s3AnotherDestBucket string
+	logPath             string
+	s3Src               Location
+	s3Dest              Location
+}
+
+func getLog(s *TestSuite) string {
+	bs, err := ioutil.ReadFile(s.logPath)
+	s.Require().NoError(err)
+
+	return string(bs)
 }
 
 func copy(ctx context.Context, src, bucket, key string, s *TestSuite) {

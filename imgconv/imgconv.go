@@ -29,9 +29,6 @@ type Config struct {
 	AccessKeyID          string
 	SecretAccessKey      string
 	BaseURL              string
-	S3Bucket             string
-	S3SrcKeyBase         string
-	S3DestKeyBase        string
 	S3StorageClass       s3types.StorageClass
 	SQSQueueURL          string
 	SQSVisibilityTimeout uint
@@ -55,13 +52,18 @@ type Environment struct {
 	log       *zap.Logger
 }
 
+const APIVersion = 2
+
+// Provided by govvv at compile time
+var Version string
+
 // CreateLogger creates and returns a new logger.
-func CreateLogger() *zap.Logger {
+func CreateLogger(logPaths []string) *zap.Logger {
 	config := &zap.Config{
 		Level:            zap.NewAtomicLevelAt(zap.DebugLevel),
 		Development:      true,
 		Encoding:         "json",
-		OutputPaths:      []string{"stderr"},
+		OutputPaths:      logPaths,
 		ErrorOutputPaths: []string{"stderr"},
 		EncoderConfig: zapcore.EncoderConfig{
 			TimeKey:        "time",
@@ -83,7 +85,7 @@ func CreateLogger() *zap.Logger {
 		panic("failed to initialize logger")
 	}
 
-	return log
+	return log.With(zap.String("version", Version))
 }
 
 func createAWSConfig(ctx context.Context, cfg *Config) *aws.Config {
@@ -134,25 +136,18 @@ func NewEnvironment(ctx context.Context, cfg *Config) *Environment {
 	}
 }
 
+type Location struct {
+	Bucket string `json:"bucket"`
+	Prefix string `json:"prefix"`
+}
+
 type task struct {
-	Bucket        string `json:"bucket"`
-	Path          string `json:"path"`
+	Version       int      `json:"version"`
+	Path          string   `json:"path"`
+	Src           Location `json:"src"`
+	Dest          Location `json:"dest"`
 	messageID     string
 	receiptHandle string
-}
-
-func (e *Environment) getSourceBucket(bucket string) string {
-	if bucket == "" {
-		return e.S3Bucket
-	}
-	return bucket
-}
-
-func (e *Environment) getSourceKey(bucket, path string) string {
-	if bucket == "" {
-		return filepath.Join(e.S3SrcKeyBase, path)
-	}
-	return path
 }
 
 func (e *Environment) worker(
@@ -177,10 +172,13 @@ func (e *Environment) worker(
 			}
 			e.log.Debug("received task",
 				idField,
-				zap.String("bucket", t.Bucket),
 				zap.String("path", t.Path),
+				zap.String("src-bucket", t.Src.Bucket),
+				zap.String("src-prefix", t.Src.Prefix),
+				zap.String("dest-bucket", t.Dest.Bucket),
+				zap.String("dest-prefix", t.Dest.Prefix),
 				zap.String("message-id", t.messageID))
-			if err := e.Convert(ctx, t.Bucket, t.Path); err != nil {
+			if err := e.Convert(ctx, t.Path, &t.Src, &t.Dest); err != nil {
 				// Error level message is output in Convert function
 				e.log.Debug("conversion finished",
 					idField,
@@ -228,21 +226,45 @@ func (e *Environment) retriever(ctx context.Context, id string, outputCh chan<- 
 
 			for _, msg := range res.Messages {
 				var t task
-				if err := json.Unmarshal([]byte(*msg.Body), &t); err != nil {
-					e.log.Error(
-						"failed to unmarshal SQS message",
-						idField,
-						zap.String("body", *msg.Body),
-						zap.String("message-id", *msg.MessageId))
-					continue
-				}
 				t.messageID = *msg.MessageId
 				t.receiptHandle = *msg.ReceiptHandle
 
+				if err := json.Unmarshal([]byte(*msg.Body), &t); err != nil {
+					e.log.Error("failed to unmarshal SQS message",
+						idField,
+						zap.String("body", *msg.Body),
+						zap.String("message-id", *msg.MessageId))
+
+					e.deleteMessages(ctx, []sqstypes.DeleteMessageBatchRequestEntry{
+						{
+							Id:            aws.String("del0"),
+							ReceiptHandle: &t.receiptHandle,
+						},
+					}, []*task{&t})
+
+					continue
+				}
+
+				if t.Version != APIVersion {
+					e.log.Warn("different task version",
+						idField,
+						zap.Int("api-version", t.Version),
+						zap.Int("expected", APIVersion))
+
+					e.deleteMessages(ctx, []sqstypes.DeleteMessageBatchRequestEntry{
+						{
+							Id:            aws.String("del0"),
+							ReceiptHandle: &t.receiptHandle,
+						},
+					}, []*task{&t})
+
+					continue
+				}
+
 				e.log.Debug("retrieved message",
 					idField,
-					zap.String("bucket", t.Bucket),
 					zap.String("path", t.Path),
+					zap.String("src-bucket", t.Src.Bucket),
 					zap.String("message-id", t.messageID))
 
 				outputCh <- &t
@@ -285,8 +307,9 @@ func (e *Environment) deleteMessages(
 			zap.String("code", *f.Code),
 			zap.String("message", *f.Message),
 			zap.Bool("sender-fault", f.SenderFault),
-			zap.String("bucket", tasks[i].Bucket),
 			zap.String("path", tasks[i].Path),
+			zap.String("src-bucket", tasks[i].Src.Bucket),
+			zap.String("message-id", tasks[i].messageID),
 		)
 	}
 }
@@ -322,8 +345,8 @@ func (e *Environment) deleter(ctx context.Context, id string, workersToDeletersC
 
 			e.log.Debug("got new task",
 				idField,
-				zap.String("bucket", t.Bucket),
-				zap.String("path", t.Path))
+				zap.String("path", t.Path),
+				zap.String("src-bucket", t.Src.Bucket))
 			id := strconv.Itoa(len(entries))
 			entries = append(entries, sqstypes.DeleteMessageBatchRequestEntry{
 				Id:            &id,
@@ -371,8 +394,8 @@ func (e *Environment) retrieverFanIn(ctx context.Context, retrieverHubToWorkersC
 		case task := <-retrieversToHubCh:
 			if _, ok := retrievedIDs[task.messageID]; ok {
 				e.log.Debug("duplicate message found",
-					zap.String("bucket", task.Bucket),
 					zap.String("path", task.Path),
+					zap.String("src-bucket", task.Src.Bucket),
 					zap.String("message-id", task.messageID))
 			} else {
 				retrievedIDs[task.messageID] = struct{}{}
