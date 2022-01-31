@@ -78,7 +78,7 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		log := imgconv.CreateLogger()
+		log := imgconv.CreateLogger([]string{"stderr"})
 		defer log.Sync()
 
 		fsize, err := units.ParseStrictBytes(c.String("max-file-size"))
@@ -90,9 +90,6 @@ func main() {
 		cfg := &imgconv.Config{
 			Region:               c.String("region"),
 			BaseURL:              c.String("base-url"),
-			S3Bucket:             c.String("s3-bucket"),
-			S3DestKeyBase:        c.String("s3-dest-key-base"),
-			S3SrcKeyBase:         c.String("s3-src-key-base"),
 			S3StorageClass:       types.StorageClass(c.String("s3-storage-class")),
 			SQSQueueURL:          c.String("sqs-queue-url"),
 			SQSVisibilityTimeout: c.Uint("sqs-vilibility-timeout"),

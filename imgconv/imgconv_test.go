@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
@@ -89,14 +91,23 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 		i := i
 		eg.Go(func() error {
 			path := fmt.Sprintf("dir/image%03d.jpg", i)
-			copy(ctx, sampleJPEG, s.env.S3Bucket, s.env.S3SrcKeyBase+"/"+path, s.TestSuite)
-			jb, err := json.Marshal(&task{Path: path})
+			copy(ctx, sampleJPEG, s.s3Src.Bucket, s.s3Src.Prefix+path, s.TestSuite)
+			jb, err := json.Marshal(&task{
+				Version: 2,
+				Path:    path,
+				Src: Location{
+					Bucket: s.s3Src.Bucket,
+					Prefix: s.s3Src.Prefix,
+				},
+				Dest: Location{
+					Bucket: s.s3Dest.Bucket,
+					Prefix: s.s3Dest.Prefix,
+				},
+			})
 			s.Require().NoError(err)
-			mb := string(jb)
-			id := "jpg-" + strconv.Itoa(i)
 			entryCh <- &types.SendMessageBatchRequestEntry{
-				Id:          &id,
-				MessageBody: &mb,
+				Id:          aws.String("jpg-" + strconv.Itoa(i)),
+				MessageBody: aws.String(string(jb)),
 			}
 			return nil
 		})
@@ -105,18 +116,25 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 	for i := 0; i < pngCount; i++ {
 		i := i
 		eg.Go(func() error {
-			path := s.env.S3SrcKeyBase + fmt.Sprintf("dir/image%03d.png", i)
-			copyAsOtherSource(ctx, samplePNG, s.s3OtherSourceBucket, path, s.TestSuite)
+			path := fmt.Sprintf("dir/image%03d.png", i)
+			copyAsOtherSource(
+				ctx, samplePNG, s.s3AnotherSrcBucket, s.s3Src.Prefix+path, s.TestSuite)
 			jb, err := json.Marshal(&task{
-				Bucket: s.s3OtherSourceBucket,
-				Path:   path,
+				Version: 2,
+				Src: Location{
+					Bucket: s.s3AnotherSrcBucket,
+					Prefix: s.s3Src.Prefix,
+				},
+				Dest: Location{
+					Bucket: s.s3Dest.Bucket,
+					Prefix: s.s3Dest.Prefix,
+				},
+				Path: path,
 			})
 			s.Require().NoError(err)
-			mb := string(jb)
-			id := "png-" + strconv.Itoa(i)
 			entryCh <- &types.SendMessageBatchRequestEntry{
-				Id:          &id,
-				MessageBody: &mb,
+				Id:          aws.String("png-" + strconv.Itoa(i)),
+				MessageBody: aws.String(string(jb)),
 			}
 			return nil
 		})
@@ -128,12 +146,27 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 	s.sendSQSMessages(entries)
 }
 
+func (s *ConvertSQSSuite) setupInvalidTasks(ctx context.Context, count int) {
+	sqsEntries := make([]types.SendMessageBatchRequestEntry, 0, count)
+
+	for i := 0; i < count; i++ {
+		jb, err := json.Marshal(&task{})
+		s.Require().NoError(err)
+		sqsEntries = append(sqsEntries, types.SendMessageBatchRequestEntry{
+			Id:          aws.String("invalid-" + strconv.Itoa(i)),
+			MessageBody: aws.String(string(jb)),
+		})
+	}
+
+	s.sendSQSMessages(sqsEntries)
+}
+
 func (s *ConvertSQSSuite) getObjectKeySet() map[string]struct{} {
 	keySet := map[string]struct{}{}
 
 	res, err := s.env.S3Client.ListObjectsV2(s.ctx, &s3.ListObjectsV2Input{
-		Bucket: &s.env.S3Bucket,
-		Prefix: &s.env.S3DestKeyBase,
+		Bucket: &s.s3Dest.Bucket,
+		Prefix: &s.s3Dest.Prefix,
 	})
 	s.Require().NoError(err)
 	for _, c := range res.Contents {
@@ -188,5 +221,14 @@ func (s *ConvertSQSSuite) TestConvertSQS200() {
 	s.setupImages(s.ctx, 100, 100)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 200)
+	s.Assert().True(s.isSQSEmpty())
+}
+
+func (s *ConvertSQSSuite) TestInvalidTasks() {
+	s.setupInvalidTasks(s.ctx, 2)
+	s.env.ConvertSQSCLI(s.ctx)
+	s.Assert().Len(s.getObjectKeySet(), 0)
+	log := getLog(s.TestSuite)
+	s.Assert().Equal(2, strings.Count(log, "different task version"))
 	s.Assert().True(s.isSQSEmpty())
 }

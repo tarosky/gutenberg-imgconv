@@ -19,6 +19,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -62,17 +63,14 @@ func (w *atOnceWriter) Bytes() []byte {
 }
 
 // Convert converts an image to WebP
-func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
-	zapBucketField := zap.String("bucket", bucket)
+func (e *Environment) Convert(ctx context.Context, path string, src, dest *Location) error {
+	zapBucketField := zap.String("src-bucket", src.Bucket)
 	zapPathField := zap.String("path", path)
-
-	sourceBucket := e.getSourceBucket(bucket)
-	sourceKey := e.getSourceKey(bucket, path)
 
 	sourceObject := func(ctx context.Context) (*s3.GetObjectOutput, error) {
 		res, err := e.S3Client.GetObject(ctx, &s3.GetObjectInput{
-			Bucket: &sourceBucket,
-			Key:    &sourceKey,
+			Bucket: &src.Bucket,
+			Key:    aws.String(src.Prefix + path),
 		})
 		if err != nil {
 			var noSuchKeyError *types.NoSuchKey
@@ -175,8 +173,8 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 	}
 
 	getTimestamp := func(srcObj *s3.GetObjectOutput) string {
-		if bucket == "" {
-			return srcObj.Metadata[timestampMetadata]
+		if ts, ok := srcObj.Metadata[timestampMetadata]; ok {
+			return ts
 		}
 
 		return srcObj.LastModified.UTC().Format(timestampLayout)
@@ -186,14 +184,14 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 		ctx context.Context,
 		srcObj *s3.GetObjectOutput,
 		body io.ReadSeeker,
-		s3key string,
+		destKey string,
 		contentType string,
 	) (int64, error) {
 		// Avoid nil-comparison pitfall
 		if body == nil || reflect.ValueOf(body).IsNil() {
 			if _, err := e.S3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-				Bucket: &e.S3Bucket,
-				Key:    &s3key,
+				Bucket: &dest.Bucket,
+				Key:    &destKey,
 			}); err != nil {
 				e.log.Error("unable to DELETE S3 object",
 					zapBucketField,
@@ -204,7 +202,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 
 			e.log.Info("reflected deletion",
 				zapPathField,
-				zap.String("s3key", s3key))
+				zap.String("dest-key", destKey))
 			return 0, nil
 		}
 
@@ -213,8 +211,8 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 			e.log.Error("no timestamp",
 				zapBucketField,
 				zapPathField,
-				zap.String("s3key", s3key))
-			return 0, fmt.Errorf("no timestamp: %s", s3key)
+				zap.String("dest-key", destKey))
+			return 0, fmt.Errorf("no timestamp: %s", destKey)
 		}
 
 		afterSize, err := seekerLen(body)
@@ -222,18 +220,18 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 			e.log.Error("failed to seek",
 				zapBucketField,
 				zapPathField,
-				zap.String("s3key", s3key))
+				zap.String("dest-key", destKey))
 			return 0, err
 		}
 
 		if _, err := e.S3Client.PutObject(ctx, &s3.PutObjectInput{
 			Body:         body,
-			Bucket:       &e.S3Bucket,
+			Bucket:       &dest.Bucket,
 			ContentType:  &contentType,
-			Key:          &s3key,
+			Key:          &destKey,
 			StorageClass: e.S3StorageClass,
 			Metadata: map[string]string{
-				bucketMetadata:    bucket,
+				bucketMetadata:    src.Bucket,
 				pathMetadata:      path,
 				timestampMetadata: timestamp,
 			},
@@ -277,13 +275,9 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 			return err
 		}
 
-		size, err := updateS3Object(
-			ctx,
-			srcObj,
-			webP,
-			filepath.Join(e.S3DestKeyBase, path+".webp"),
-			webPContentType,
-		)
+		key := dest.Prefix + path + ".webp"
+
+		size, err := updateS3Object(ctx, srcObj, webP, key, webPContentType)
 		if err != nil {
 			return err
 		}
@@ -292,6 +286,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 			e.log.Info("converted",
 				zapBucketField,
 				zapPathField,
+				zap.String("dest-key", key),
 				zap.Int64("before", srcObj.ContentLength),
 				zap.Int64("after", size))
 		}
@@ -381,7 +376,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 		}
 		defer cleanup()
 
-		key := filepath.Join(e.S3DestKeyBase, path)
+		key := dest.Prefix + path
 
 		size, err := updateS3Object(ctx, srcObj, jsFile, key, javaScriptContentType)
 		if err != nil {
@@ -392,7 +387,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 			e.log.Info("JavaScript minified",
 				zapBucketField,
 				zapPathField,
-				zap.String("s3key", key),
+				zap.String("dest-key", key),
 				zap.Int64("before", srcObj.ContentLength),
 				zap.Int64("after", size))
 		}
@@ -410,7 +405,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 		}
 		defer cleanup()
 
-		key := filepath.Join(e.S3DestKeyBase, path+".map")
+		key := dest.Prefix + path + ".map"
 
 		size, err := updateS3Object(ctx, srcObj, mapFile, key, sourceMapContentType)
 		if err != nil {
@@ -421,7 +416,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 			e.log.Info("source map generated",
 				zapBucketField,
 				zapPathField,
-				zap.String("s3key", key),
+				zap.String("dest-key", key),
 				zap.Int64("size", size))
 		}
 		return nil
@@ -467,7 +462,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 		}
 		defer cleanup()
 
-		key := filepath.Join(e.S3DestKeyBase, path)
+		key := dest.Prefix + path
 
 		size, err := updateS3Object(ctx, srcObj, cssFile, key, cssContentType)
 		if err != nil {
@@ -478,7 +473,7 @@ func (e *Environment) Convert(ctx context.Context, bucket, path string) error {
 			e.log.Info("CSS minified",
 				zapBucketField,
 				zapPathField,
-				zap.String("s3key", key),
+				zap.String("dest-key", key),
 				zap.Int64("before", srcObj.ContentLength),
 				zap.Int64("after", size))
 		}

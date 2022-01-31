@@ -24,28 +24,28 @@ func (s *ConvertSuite) SetupTest() {
 
 	eg, ctx := errgroup.WithContext(s.ctx)
 	eg.Go(func() error {
-		key := s.env.S3SrcKeyBase + "/dir/image.jpg"
-		copy(ctx, sampleJPEG, s.env.S3Bucket, key, s.TestSuite)
+		key := s.s3Src.Prefix + "dir/image.jpg"
+		copy(ctx, sampleJPEG, s.s3Src.Bucket, key, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
-		key := s.env.S3SrcKeyBase + "/dir/image.png"
-		copy(ctx, samplePNG, s.env.S3Bucket, key, s.TestSuite)
+		key := s.s3Src.Prefix + "dir/image.png"
+		copy(ctx, samplePNG, s.s3Src.Bucket, key, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
-		key := s.env.S3SrcKeyBase + "/dir/script.js"
-		copy(ctx, sampleJS, s.env.S3Bucket, key, s.TestSuite)
+		key := s.s3Src.Prefix + "dir/script.js"
+		copy(ctx, sampleJS, s.s3Src.Bucket, key, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
-		key := s.env.S3SrcKeyBase + "/dir/style.css"
-		copy(ctx, sampleCSS, s.env.S3Bucket, key, s.TestSuite)
+		key := s.s3Src.Prefix + "dir/style.css"
+		copy(ctx, sampleCSS, s.s3Src.Bucket, key, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
-		key := s.env.S3SrcKeyBase + "/dir/image.jpg"
-		copyAsOtherSource(ctx, sampleJPEG, s.s3OtherSourceBucket, key, s.TestSuite)
+		key := s.s3Src.Prefix + "dir/image.jpg"
+		copyAsOtherSource(ctx, sampleJPEG, s.s3AnotherSrcBucket, key, s.TestSuite)
 		return nil
 	})
 	eg.Wait()
@@ -60,11 +60,10 @@ func TestConvertSuite(t *testing.T) {
 	suite.Run(t, s)
 }
 
-func (s *ConvertSuite) assertS3ImageObjectExists(bucket, path string) {
-	key := s.env.S3DestKeyBase + "/" + path + ".webp"
+func (s *ConvertSuite) assertS3ImageObjectExists(path string) {
 	res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-		Bucket: &s.env.S3Bucket,
-		Key:    &key,
+		Bucket: &s.s3Dest.Bucket,
+		Key:    aws.String(s.s3Dest.Prefix + path + ".webp"),
 	})
 	s.Assert().NoError(err)
 	defer func() {
@@ -79,14 +78,13 @@ func (s *ConvertSuite) assertS3ImageObjectExists(bucket, path string) {
 	s.Assert().Equal(webPContentType, http.DetectContentType(head))
 	s3DestObjTime, err := time.Parse(timestampLayout, res.Metadata[timestampMetadata])
 	s.Assert().NoError(err)
-	s.Assert().Equal("", res.Metadata[bucketMetadata])
+	s.Assert().Equal(s.s3Src.Bucket, res.Metadata[bucketMetadata])
 	s.Assert().Equal(path, res.Metadata[pathMetadata])
 	s.Assert().Equal(webPContentType, *res.ContentType)
 
-	srcKey := s.env.S3SrcKeyBase + "/" + path
 	info, err := s.env.S3Client.HeadObject(s.ctx, &s3.HeadObjectInput{
-		Bucket: &bucket,
-		Key:    &srcKey,
+		Bucket: &s.s3Src.Bucket,
+		Key:    aws.String(s.s3Src.Prefix + path),
 	})
 	s.Require().NoError(err)
 	s.Assert().Greater(info.ContentLength, res.ContentLength, "file size has been decreased")
@@ -95,21 +93,19 @@ func (s *ConvertSuite) assertS3ImageObjectExists(bucket, path string) {
 	s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
 }
 
-func (s *ConvertSuite) assertS3JSObjectExists(bucket, path string) {
-	srcKey := s.env.S3SrcKeyBase + "/" + path
+func (s *ConvertSuite) assertS3JSObjectExists(path string) {
 	info, err := s.env.S3Client.HeadObject(s.ctx, &s3.HeadObjectInput{
-		Bucket: &bucket,
-		Key:    &srcKey,
+		Bucket: &s.s3Src.Bucket,
+		Key:    aws.String(s.s3Src.Prefix + path),
 	})
 	s.Require().NoError(err)
 	s3SrcObjTime, err := time.Parse(timestampLayout, info.Metadata[timestampMetadata])
 	s.Require().NoError(err)
 
 	{
-		jsKey := s.env.S3DestKeyBase + "/" + path
 		res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &jsKey,
+			Bucket: &s.s3Dest.Bucket,
+			Key:    aws.String(s.s3Dest.Prefix + path),
 		})
 		s.Assert().NoError(err)
 		defer func() {
@@ -123,7 +119,7 @@ func (s *ConvertSuite) assertS3JSObjectExists(bucket, path string) {
 
 		s3DestObjTime, err := time.Parse(timestampLayout, res.Metadata[timestampMetadata])
 		s.Assert().NoError(err)
-		s.Assert().Equal("", res.Metadata[bucketMetadata])
+		s.Assert().Equal(s.s3Src.Bucket, res.Metadata[bucketMetadata])
 		s.Assert().Equal(path, res.Metadata[pathMetadata])
 		s.Assert().Equal(javaScriptContentType, *res.ContentType)
 		s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
@@ -134,10 +130,9 @@ func (s *ConvertSuite) assertS3JSObjectExists(bucket, path string) {
 	}
 
 	{
-		sourceMapKey := s.env.S3DestKeyBase + "/" + path + ".map"
 		res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &sourceMapKey,
+			Bucket: &s.s3Dest.Bucket,
+			Key:    aws.String(s.s3Dest.Prefix + path + ".map"),
 		})
 		s.Assert().NoError(err)
 		defer func() {
@@ -145,7 +140,7 @@ func (s *ConvertSuite) assertS3JSObjectExists(bucket, path string) {
 		}()
 		s3DestObjTime, err := time.Parse(timestampLayout, res.Metadata[timestampMetadata])
 		s.Assert().NoError(err)
-		s.Assert().Equal("", res.Metadata[bucketMetadata])
+		s.Assert().Equal(s.s3Src.Bucket, res.Metadata[bucketMetadata])
 		s.Assert().Equal(path, res.Metadata[pathMetadata])
 		s.Assert().Equal(sourceMapContentType, *res.ContentType)
 		s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
@@ -154,11 +149,10 @@ func (s *ConvertSuite) assertS3JSObjectExists(bucket, path string) {
 	}
 }
 
-func (s *ConvertSuite) assertS3CSSObjectExists(bucket, path string) {
-	key := s.env.S3DestKeyBase + "/" + path
+func (s *ConvertSuite) assertS3CSSObjectExists(path string) {
 	res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-		Bucket: &s.env.S3Bucket,
-		Key:    &key,
+		Bucket: &s.s3Dest.Bucket,
+		Key:    aws.String(s.s3Dest.Prefix + path),
 	})
 	s.Assert().NoError(err)
 	defer func() {
@@ -172,14 +166,13 @@ func (s *ConvertSuite) assertS3CSSObjectExists(bucket, path string) {
 	}
 	s3DestObjTime, err := time.Parse(timestampLayout, res.Metadata[timestampMetadata])
 	s.Assert().NoError(err)
-	s.Assert().Equal("", res.Metadata[bucketMetadata])
+	s.Assert().Equal(s.s3Src.Bucket, res.Metadata[bucketMetadata])
 	s.Assert().Equal(path, res.Metadata[pathMetadata])
 	s.Assert().Equal(cssContentType, *res.ContentType)
 
-	srcKey := s.env.S3SrcKeyBase + "/" + path
 	info, err := s.env.S3Client.HeadObject(s.ctx, &s3.HeadObjectInput{
-		Bucket: &bucket,
-		Key:    &srcKey,
+		Bucket: &s.s3Src.Bucket,
+		Key:    aws.String(s.s3Src.Prefix + path),
 	})
 	s.Require().NoError(err)
 	s.Assert().Greater(info.ContentLength, res.ContentLength, "file size has been decreased")
@@ -188,10 +181,10 @@ func (s *ConvertSuite) assertS3CSSObjectExists(bucket, path string) {
 	s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
 }
 
-func (s *ConvertSuite) assertS3ObjectNotExists(key string) {
+func (s *ConvertSuite) assertS3ObjectNotExists(path string) {
 	_, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-		Bucket: &s.env.S3Bucket,
-		Key:    &key,
+		Bucket: &s.s3Dest.Bucket,
+		Key:    aws.String(s.s3Dest.Prefix + path),
 	})
 
 	var noSuchKeyError *types.NoSuchKey
@@ -199,89 +192,93 @@ func (s *ConvertSuite) assertS3ObjectNotExists(key string) {
 }
 
 func (s *ConvertSuite) TestConvertJPG() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "", "dir/image.jpg"))
-	s.assertS3ImageObjectExists(s.env.S3Bucket, "dir/image.jpg")
+	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image.jpg", &s.s3Src, &s.s3Dest))
+	s.assertS3ImageObjectExists("dir/image.jpg")
 }
 
 func (s *ConvertSuite) TestConvertPNG() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "", "dir/image.png"))
-	s.assertS3ImageObjectExists(s.env.S3Bucket, "dir/image.png")
+	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image.png", &s.s3Src, &s.s3Dest))
+	s.assertS3ImageObjectExists("dir/image.png")
 }
 
 func (s *ConvertSuite) TestConvertNonExistent() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "", "dir/nonexistent.jpg"))
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/dir/nonexistent.jpg.webp")
+	s.Assert().NoError(s.env.Convert(s.ctx, "dir/nonexistent.jpg", &s.s3Src, &s.s3Dest))
+	s.assertS3ObjectNotExists("dir/nonexistent.jpg.webp")
 }
 
 func (s *ConvertSuite) TestRemoveConvertedImage() {
 	path := "dir/image.jpg"
-	s.Require().NoError(s.env.Convert(s.ctx, "", path))
+	s.Require().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
 
 	{
-		key := s.env.S3SrcKeyBase + "/" + path
 		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &key,
+			Bucket: &s.s3Src.Bucket,
+			Key:    aws.String(s.s3Src.Prefix + path),
 		})
 		s.Require().NoError(err)
 	}
 
-	s.Assert().NoError(s.env.Convert(s.ctx, "", path))
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path + ".webp")
+	s.Assert().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
+	s.assertS3ObjectNotExists(path + ".webp")
 }
 
 func (s *ConvertSuite) TestMinifyJS() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "", "dir/script.js"))
-	s.assertS3JSObjectExists(s.env.S3Bucket, "dir/script.js")
+	s.Assert().NoError(s.env.Convert(s.ctx, "dir/script.js", &s.s3Src, &s.s3Dest))
+	s.assertS3JSObjectExists("dir/script.js")
 }
 
 func (s *ConvertSuite) TestRemoveMinifiedJS() {
 	path := "dir/script.js"
-	s.Require().NoError(s.env.Convert(s.ctx, "", path))
+	s.Require().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
 
 	{
-		key := s.env.S3SrcKeyBase + "/" + path
 		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &key,
+			Bucket: &s.s3Src.Bucket,
+			Key:    aws.String(s.s3Src.Prefix + path),
 		})
 		s.Require().NoError(err)
 	}
 
-	s.Assert().NoError(s.env.Convert(s.ctx, "", path))
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path)
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path + ".map")
+	s.Assert().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
+	s.assertS3ObjectNotExists(path)
+	s.assertS3ObjectNotExists(path + ".map")
 }
 
 func (s *ConvertSuite) TestMinifyCSS() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "", "dir/style.css"))
-	s.assertS3CSSObjectExists(s.env.S3Bucket, "dir/style.css")
+	s.Assert().NoError(s.env.Convert(s.ctx, "dir/style.css", &s.s3Src, &s.s3Dest))
+	s.assertS3CSSObjectExists("dir/style.css")
 }
 
 func (s *ConvertSuite) TestRemoveMinifiedCSS() {
 	path := "dir/style.css"
-	s.Require().NoError(s.env.Convert(s.ctx, "", path))
+	s.Require().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
 
 	{
-		key := s.env.S3SrcKeyBase + "/" + path
 		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
-			Bucket: &s.env.S3Bucket,
-			Key:    &key,
+			Bucket: &s.s3Src.Bucket,
+			Key:    aws.String(s.s3Src.Prefix + path),
 		})
 		s.Require().NoError(err)
 	}
 
-	s.Assert().NoError(s.env.Convert(s.ctx, "", path))
-	s.assertS3ObjectNotExists(s.env.S3DestKeyBase + "/" + path)
+	s.Assert().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
+	s.assertS3ObjectNotExists(path)
 }
 
-func (s *ConvertSuite) TestConvertJPGInOtherSourceBucket() {
-	path := s.env.S3SrcKeyBase + "/dir/image.jpg"
-	s.Assert().NoError(s.env.Convert(s.ctx, s.s3OtherSourceBucket, path))
+func (s *ConvertSuite) TestConvertJPGInAnotherSrcBucket() {
+	path := "dir/image.jpg"
+	s.Assert().NoError(s.env.Convert(
+		s.ctx,
+		path,
+		&Location{
+			Bucket: s.s3AnotherSrcBucket,
+			Prefix: s.s3Src.Prefix,
+		},
+		&s.s3Dest))
 
 	dest, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-		Bucket: &s.env.S3Bucket,
-		Key:    aws.String(s.env.S3DestKeyBase + "/" + path + ".webp"),
+		Bucket: &s.s3Dest.Bucket,
+		Key:    aws.String(s.s3Dest.Prefix + path + ".webp"),
 	})
 	s.Assert().NoError(err)
 	defer func() {
@@ -296,17 +293,15 @@ func (s *ConvertSuite) TestConvertJPGInOtherSourceBucket() {
 	s.Assert().Equal(webPContentType, http.DetectContentType(head))
 	s3DestObjTime, err := time.Parse(timestampLayout, dest.Metadata[timestampMetadata])
 	s.Assert().NoError(err)
-	s.Assert().Equal(s.s3OtherSourceBucket, dest.Metadata[bucketMetadata])
+	s.Assert().Equal(s.s3AnotherSrcBucket, dest.Metadata[bucketMetadata])
 	s.Assert().Equal(path, dest.Metadata[pathMetadata])
 	s.Assert().Equal(webPContentType, *dest.ContentType)
 
 	src, err := s.env.S3Client.HeadObject(s.ctx, &s3.HeadObjectInput{
-		Bucket: &s.s3OtherSourceBucket,
-		Key:    aws.String(path),
+		Bucket: &s.s3AnotherSrcBucket,
+		Key:    aws.String(s.s3Src.Prefix + path),
 	})
 	s.Require().NoError(err)
 	s.Assert().Greater(src.ContentLength, dest.ContentLength, "file size has been decreased")
-	s3SrcObjTime := *src.LastModified
-	s.Require().NoError(err)
-	s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
+	s.Assert().Equal(*src.LastModified, s3DestObjTime)
 }
