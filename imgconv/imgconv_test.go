@@ -50,7 +50,7 @@ func (s *ConvertSQSSuite) sendSQSMessages(entries []types.SendMessageBatchReques
 	}
 }
 
-func (s *ConvertSQSSuite) isSQSEmpty() bool {
+func (s *ConvertSQSSuite) getSQSMessages() []types.Message {
 	time.Sleep(time.Duration(s.env.SQSVisibilityTimeout) * time.Second)
 
 	res, err := s.env.SQSClient.ReceiveMessage(s.ctx, &sqs.ReceiveMessageInput{
@@ -59,7 +59,7 @@ func (s *ConvertSQSSuite) isSQSEmpty() bool {
 	})
 	s.Require().NoError(err)
 
-	return len(res.Messages) == 0
+	return res.Messages
 }
 
 func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount int) {
@@ -193,35 +193,35 @@ func (s *ConvertSQSSuite) TestConvertSQS0() {
 	s.setupImages(s.ctx, 0, 0)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 0)
-	s.Assert().True(s.isSQSEmpty())
+	s.Assert().Len(s.getSQSMessages(), 0)
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS1() {
 	s.setupImages(s.ctx, 1, 0)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 1)
-	s.Assert().True(s.isSQSEmpty())
+	s.Assert().Len(s.getSQSMessages(), 0)
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS2() {
 	s.setupImages(s.ctx, 1, 1)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 2)
-	s.Assert().True(s.isSQSEmpty())
+	s.Assert().Len(s.getSQSMessages(), 0)
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS10() {
 	s.setupImages(s.ctx, 5, 5)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 10)
-	s.Assert().True(s.isSQSEmpty())
+	s.Assert().Len(s.getSQSMessages(), 0)
 }
 
 func (s *ConvertSQSSuite) TestConvertSQS200() {
 	s.setupImages(s.ctx, 100, 100)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 200)
-	s.Assert().True(s.isSQSEmpty())
+	s.Assert().Len(s.getSQSMessages(), 0)
 }
 
 func (s *ConvertSQSSuite) TestInvalidTasks() {
@@ -230,5 +230,5 @@ func (s *ConvertSQSSuite) TestInvalidTasks() {
 	s.Assert().Len(s.getObjectKeySet(), 0)
 	log := getLog(s.TestSuite)
 	s.Assert().Equal(2, strings.Count(log, "different task version"))
-	s.Assert().True(s.isSQSEmpty())
+	s.Assert().Len(s.getSQSMessages(), 0)
 }
