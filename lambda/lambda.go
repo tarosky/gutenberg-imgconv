@@ -16,8 +16,9 @@ import (
 // Task is used to convert specific image directly.
 // Empty Path field means this execution is a regular cron job.
 type Task struct {
-	Bucket string `json:"bucket"`
-	Path   string `json:"path"`
+	Path string           `json:"path"`
+	Src  imgconv.Location `json:"src"`
+	Dest imgconv.Location `json:"dest"`
 }
 
 var env *imgconv.Environment
@@ -25,7 +26,7 @@ var env *imgconv.Environment
 // HandleRequest handles requests from Lambda environment.
 func HandleRequest(ctx context.Context, task Task) error {
 	if task.Path != "" {
-		if err := env.Convert(ctx, task.Bucket, task.Path); err != nil {
+		if err := env.Convert(ctx, task.Path, &task.Src, &task.Dest); err != nil {
 			return fmt.Errorf("image conversion failed")
 		}
 		return nil
@@ -97,9 +98,6 @@ func main() {
 	env = imgconv.NewEnvironment(context.Background(), &imgconv.Config{
 		Region:               os.Getenv("AWS_REGION"),
 		BaseURL:              os.Getenv("BASE_URL"),
-		S3Bucket:             os.Getenv("S3_BUCKET"),
-		S3DestKeyBase:        os.Getenv("S3_DEST_KEY_BASE"),
-		S3SrcKeyBase:         os.Getenv("S3_SRC_KEY_BASE"),
 		S3StorageClass:       getEnvStorageClass("S3_STORAGE_CLASS", types.StorageClassStandard),
 		SQSQueueURL:          os.Getenv("SQS_QUEUE_URL"),
 		SQSVisibilityTimeout: getEnvUint("SQS_VISIBILITY_TIMEOUT", 300),
@@ -109,7 +107,7 @@ func main() {
 		RetrieverCount:       getEnvUint8("RETRIEVER_COUNT", 2),
 		DeleterCount:         getEnvUint8("DELETER_COUNT", 2),
 		OrderStop:            getEnvDuration("ORDER_STOP", "30s"),
-		Log:                  imgconv.CreateLogger(),
+		Log:                  imgconv.CreateLogger([]string{"stderr"}),
 	})
 
 	lambda.Start(HandleRequest)

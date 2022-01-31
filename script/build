@@ -1,0 +1,3 @@
+#!/bin/bash -eux
+
+exec govvv build -o work/imgconv .

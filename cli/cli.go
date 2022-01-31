@@ -25,18 +25,23 @@ func main() {
 			Aliases: []string{"u"},
 		},
 		&cli.StringFlag{
-			Name:     "s3-bucket",
-			Aliases:  []string{"b"},
+			Name:     "s3-src-bucket",
+			Aliases:  []string{"sb"},
 			Required: true,
 		},
 		&cli.StringFlag{
-			Name:     "s3-dest-key-base",
-			Aliases:  []string{"dk"},
-			Required: true,
-		},
-		&cli.StringFlag{
-			Name:     "s3-src-key-base",
+			Name:     "s3-src-prefix",
 			Aliases:  []string{"sk"},
+			Required: true,
+		},
+		&cli.StringFlag{
+			Name:     "s3-dest-bucket",
+			Aliases:  []string{"db"},
+			Required: true,
+		},
+		&cli.StringFlag{
+			Name:     "s3-dest-prefix",
+			Aliases:  []string{"dk"},
 			Required: true,
 		},
 		&cli.StringFlag{
@@ -57,7 +62,7 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		log := imgconv.CreateLogger()
+		log := imgconv.CreateLogger([]string{"stderr"})
 		defer log.Sync()
 
 		fsize, err := units.ParseStrictBytes(c.String("max-file-size"))
@@ -69,9 +74,6 @@ func main() {
 		cfg := &imgconv.Config{
 			Region:         c.String("region"),
 			BaseURL:        c.String("base-url"),
-			S3Bucket:       c.String("s3-bucket"),
-			S3DestKeyBase:  c.String("s3-dest-key-base"),
-			S3SrcKeyBase:   c.String("s3-src-key-base"),
 			S3StorageClass: types.StorageClass(c.String("s3-storage-class")),
 			MaxFileSize:    fsize,
 			WebPQuality:    uint8(c.Uint("webp-quality")),
@@ -82,7 +84,18 @@ func main() {
 
 		env := imgconv.NewEnvironment(c.Context, cfg)
 
-		if err := env.Convert(c.Context, "", path); err != nil {
+		if err := env.Convert(
+			c.Context,
+			path,
+			&imgconv.Location{
+				Bucket: c.String("s3-src-bucket"),
+				Prefix: c.String("s3-src-prefix"),
+			},
+			&imgconv.Location{
+				Bucket: c.String("s3-dest-bucket"),
+				Prefix: c.String("s3-dest-prefix"),
+			},
+		); err != nil {
 			return fmt.Errorf("failed to convert: %s", path)
 		}
 
