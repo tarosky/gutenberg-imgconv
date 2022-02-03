@@ -54,11 +54,21 @@ jobs:
     - name: Build on the same machine image
       run: |
         cmd="
-        yum install -y git gcc
+        yum install -y git gcc diffutils texinfo
+        curl -fsSL -o binutils-2.26.tar.gz https://ftp.gnu.org/gnu/binutils/binutils-2.26.tar.gz
+        tar xvzf binutils-2.26.tar.gz
+
+        cd binutils-2.26
+        ./configure
+        make
+        make install
+
+        cd /
         curl -fsSL -o go.tar.gz https://go.dev/dl/go${{env.GO_VERSION}}.linux-amd64.tar.gz
         tar -C /usr/local -xzf go.tar.gz
         ln -s /usr/local/go/bin/go /usr/local/bin/go
         go install github.com/ahmetb/govvv@v0.3.0
+
         cd /workspace
         GOOS=linux ~/go/bin/govvv build -pkg github.com/tarosky/gutenberg-imgconv/imgconv -o work/imgconv lambda/lambda.go
         "
