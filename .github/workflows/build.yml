@@ -51,9 +51,24 @@ jobs:
       run: echo "$BUILD_NUMBER" > work/BUILD_NUMBER
     - name: Embed build number into code
       run: echo "build-$BUILD_NUMBER" > ./VERSION
-    - run: ~/go/bin/govvv build -pkg github.com/tarosky/gutenberg-imgconv/imgconv -o work/imgconv lambda/lambda.go
-      env:
-        GOOS: linux
+    - name: Build on the same machine image
+      run: |
+        cmd="
+        yum install -y git gcc
+        curl -fsSL -o go.tar.gz https://go.dev/dl/go${{env.GO_VERSION}}.linux-amd64.tar.gz
+        tar -C /usr/local -xzf go.tar.gz
+        ln -s /usr/local/go/bin/go /usr/local/bin/go
+        go install github.com/ahmetb/govvv@v0.3.0
+        cd /workspace
+        GOOS=linux ~/go/bin/govvv build -pkg github.com/tarosky/gutenberg-imgconv/imgconv -o work/imgconv lambda/lambda.go
+        "
+
+        docker container run \
+          --rm \
+          --entrypoint /bin/bash \
+          --mount type=bind,source="$(pwd)",target=/workspace \
+          amazonlinux:1 \
+          -eux -c "$cmd"
     - uses: actions/upload-artifact@v2
       with:
         name: artifact
