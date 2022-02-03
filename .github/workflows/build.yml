@@ -51,7 +51,9 @@ jobs:
       run: echo "$BUILD_NUMBER" > work/BUILD_NUMBER
     - name: Embed build number into code
       run: echo "build-$BUILD_NUMBER" > ./VERSION
-    - name: Build on the same machine image
+    - name: Build on the same machine image as AWS Lambda
+      # Use binutils 2.26 to avoid unrecognized relocation error
+      # https://programmerah.com/unrecognized-relocation-0x2a-in-section-text-5565/
       run: |
         cmd="
         yum install -y git gcc diffutils texinfo
