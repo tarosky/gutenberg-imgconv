@@ -254,7 +254,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 
 		img, _, err := image.Decode(srcObj.Body)
 		if err != nil {
-			e.log.Error("failed to decode image",
+			e.log.Info("failed to decode image",
 				zapBucketField,
 				zapPathField,
 				zap.Error(err))
@@ -353,7 +353,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		cmd.Stderr = &stderrBuf
 
 		if err := cmd.Run(); err != nil {
-			e.log.Error("failed to run uglifyjs",
+			e.log.Info("failed to run uglifyjs",
 				zapBucketField,
 				zapPathField,
 				zap.Error(err),
@@ -500,7 +500,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		}()
 
 		if err := e.minifyCSS(file, body, map[string]string{}); err != nil {
-			e.log.Error("failed to minify CSS",
+			e.log.Info("failed to minify CSS",
 				zapBucketField,
 				zapPathField,
 				zap.Error(err))
