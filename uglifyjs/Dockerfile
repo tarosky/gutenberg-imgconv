@@ -1,5 +1,5 @@
 ARG nodejs_version
-FROM node:$nodejs_version-stretch
+FROM node:$nodejs_version-buster
 
 ARG uid
 ARG gid
