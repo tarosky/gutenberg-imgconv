@@ -52,8 +52,10 @@ jobs:
     - name: Embed build number into code
       run: echo "build-$BUILD_NUMBER" > ./VERSION
     - name: Build on the same machine image as AWS Lambda
-      # Use binutils 2.26 to avoid unrecognized relocation error
+      # Use binutils 2.26 to avoid unrecognized relocation error.
       # https://programmerah.com/unrecognized-relocation-0x2a-in-section-text-5565/
+      #
+      # Add "safe.directory" to avoid "detected dubious ownership in repository" error.
       run: |
         cmd="
         yum install -y git gcc diffutils texinfo
@@ -72,7 +74,6 @@ jobs:
         go install github.com/ahmetb/govvv@v0.3.0
 
         cd /workspace
-        # Avoid "detected dubious ownership in repository" error
         git config --global --add safe.directory /workspace
         GOOS=linux ~/go/bin/govvv build -pkg github.com/tarosky/gutenberg-imgconv/imgconv -o work/imgconv lambda/lambda.go
         "
