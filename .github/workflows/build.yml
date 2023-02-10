@@ -72,6 +72,8 @@ jobs:
         go install github.com/ahmetb/govvv@v0.3.0
 
         cd /workspace
+        # Avoid "detected dubious ownership in repository" error
+        git config --global --add safe.directory /workspace
         GOOS=linux ~/go/bin/govvv build -pkg github.com/tarosky/gutenberg-imgconv/imgconv -o work/imgconv lambda/lambda.go
         "
 
