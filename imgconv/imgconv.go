@@ -54,7 +54,7 @@ type Environment struct {
 
 const APIVersion = 2
 
-// Provided by govvv at compile time
+// Provided at compile time
 var Version string
 
 // CreateLogger creates and returns a new logger.

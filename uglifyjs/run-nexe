@@ -2,5 +2,6 @@
 
 set -eu
 
+# shellcheck disable=SC1091
 source uglifyjs/envs.sh
 exec docker-compose -f uglifyjs/docker-compose.yml run --rm nexe
