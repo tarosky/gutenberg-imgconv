@@ -1,3 +1,7 @@
-#!/bin/bash -eux
+#!/bin/bash -eu
 
-exec govvv build -o work/imgconv .
+exec go build \
+  -ldflags "-X github.com/tarosky/gutenberg-imgconv/imgconv.Version=develop" \
+  -tags lambda.norpc \
+  -o work/imgconv \
+  cli/cli.go

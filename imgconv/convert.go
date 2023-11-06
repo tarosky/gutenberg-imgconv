@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,7 +150,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 	}
 
 	createTempDir := func() (string, func(), error) {
-		tempDir, err := ioutil.TempDir("", "")
+		tempDir, err := os.MkdirTemp("", "")
 		if err != nil {
 			e.log.Error("failed to create temp dir",
 				zapBucketField,
@@ -349,7 +348,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			"--output",
 			minifiedJSPath,
 		)
-		cmd.Stdout = ioutil.Discard
+		cmd.Stdout = io.Discard
 		cmd.Stderr = &stderrBuf
 
 		if err := cmd.Run(); err != nil {

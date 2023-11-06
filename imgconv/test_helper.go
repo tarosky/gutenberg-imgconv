@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -47,7 +46,7 @@ func readTestConfig(name string) string {
 	}
 
 	path := cwd + "/config/test/" + name
-	val, err := ioutil.ReadFile(path)
+	val, err := os.ReadFile(path)
 	if err != nil {
 		panic("failed to load config file: " + path + ", error: " + err.Error())
 	}
@@ -153,7 +152,7 @@ type TestSuite struct {
 }
 
 func getLog(s *TestSuite) string {
-	bs, err := ioutil.ReadFile(s.logPath)
+	bs, err := os.ReadFile(s.logPath)
 	s.Require().NoError(err)
 
 	return string(bs)
