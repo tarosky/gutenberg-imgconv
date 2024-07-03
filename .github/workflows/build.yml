@@ -80,7 +80,7 @@ jobs:
           -eux -c "$cmd"
     - uses: actions/upload-artifact@main
       with:
-        name: artifact
+        name: artifact-bootstrap
         path: work/bootstrap
     - uses: actions/upload-artifact@main
       with:
@@ -95,7 +95,7 @@ jobs:
     - run: uglifyjs/run-nexe
     - uses: actions/upload-artifact@main
       with:
-        name: artifact
+        name: artifact-uglifyjs
         path: work/uglifyjs
 
   test:
@@ -105,7 +105,7 @@ jobs:
     - uses: actions/checkout@main
     - uses: actions/download-artifact@main
       with:
-        name: artifact
+        name: artifact-uglifyjs
         path: work
     - run: chmod +x work/uglifyjs
     - uses: actions/setup-go@main
@@ -122,7 +122,7 @@ jobs:
         TEST_SECRET_ACCESS_KEY: ${{secrets.AWS_TEST_SECRET_ACCESS_KEY}}
     - run: go get github.com/jstemmer/go-junit-report
     - run: go install github.com/jstemmer/go-junit-report
-    - run: go test -v ./bootstrap 2>&1 | tee work/test.log
+    - run: go test -v ./imgconv 2>&1 | tee work/test.log
     - run: go-junit-report < work/test.log > work/report.xml
     - uses: actions/upload-artifact@main
       with:
@@ -143,12 +143,15 @@ jobs:
     steps:
     - uses: actions/download-artifact@main
       with:
-        name: artifact
+        name: artifact-bootstrap
+    - uses: actions/download-artifact@main
+      with:
+        name: artifact-uglifyjs
     - run: chmod +x bootstrap uglifyjs
     - run: zip -j imgconv.zip ./bootstrap ./uglifyjs
     - uses: actions/upload-artifact@main
       with:
-        name: artifact
+        name: artifact-imgconv
         path: imgconv.zip
 
   release:
@@ -160,13 +163,13 @@ jobs:
     steps:
     - uses: actions/download-artifact@main
       with:
-        name: artifact
+        name: artifact-imgconv
     - uses: actions/download-artifact@main
       with:
         name: build-number
     - name: set BUILD_NUMBER
       run: echo "BUILD_NUMBER=$(< ./BUILD_NUMBER)" >> $GITHUB_ENV
-    - name: set BUILD_NUMBER
+    - name: set ASSET_NAME
       run: echo "ASSET_NAME=imgconv.build-$BUILD_NUMBER-awslambda-provided-amd64.zip" >> $GITHUB_ENV
     - name: rename
       run: cp imgconv.zip "$ASSET_NAME"
