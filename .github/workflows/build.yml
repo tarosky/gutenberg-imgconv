@@ -78,11 +78,11 @@ jobs:
           --mount type=bind,source="$(pwd)",target=/workspace \
           amazonlinux:2 \
           -eux -c "$cmd"
-    - uses: actions/upload-artifact@main
+    - uses: actions/upload-artifact@v4
       with:
         name: artifact-bootstrap
         path: work/bootstrap
-    - uses: actions/upload-artifact@main
+    - uses: actions/upload-artifact@v4
       with:
         name: build-number
         path: work/BUILD_NUMBER
@@ -93,7 +93,7 @@ jobs:
     - uses: actions/checkout@main
     - run: uglifyjs/build-image
     - run: uglifyjs/run-nexe
-    - uses: actions/upload-artifact@main
+    - uses: actions/upload-artifact@v4
       with:
         name: artifact-uglifyjs
         path: work/uglifyjs
@@ -103,11 +103,11 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@main
-    - uses: actions/download-artifact@main
+    - uses: actions/download-artifact@v4
       with:
         name: artifact-bootstrap
         path: work
-    - uses: actions/download-artifact@main
+    - uses: actions/download-artifact@v4
       with:
         name: artifact-uglifyjs
         path: work
@@ -126,9 +126,9 @@ jobs:
         TEST_SECRET_ACCESS_KEY: ${{secrets.AWS_TEST_SECRET_ACCESS_KEY}}
     - run: go get github.com/jstemmer/go-junit-report
     - run: go install github.com/jstemmer/go-junit-report
-    - run: go test -v ./bootstrap 2>&1 | tee work/test.log
+    - run: go test -v ./imgconv 2>&1 | tee work/test.log
     - run: go-junit-report < work/test.log > work/report.xml
-    - uses: actions/upload-artifact@main
+    - uses: actions/upload-artifact@v4
       with:
         name: report.xml
         path: work/report.xml
@@ -145,15 +145,15 @@ jobs:
     - build-uglifyjs
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/download-artifact@main
+    - uses: actions/download-artifact@v4
       with:
         name: artifact-bootstrap
-    - uses: actions/download-artifact@main
+    - uses: actions/download-artifact@v4
       with:
         name: artifact-uglifyjs
     - run: chmod +x bootstrap uglifyjs
     - run: zip -j imgconv.zip ./bootstrap ./uglifyjs
-    - uses: actions/upload-artifact@main
+    - uses: actions/upload-artifact@v4
       with:
         name: artifact-imgconv
         path: imgconv.zip
@@ -165,10 +165,10 @@ jobs:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/download-artifact@main
+    - uses: actions/download-artifact@v4
       with:
         name: artifact-imgconv
-    - uses: actions/download-artifact@main
+    - uses: actions/download-artifact@v4
       with:
         name: build-number
     - name: set BUILD_NUMBER
