@@ -80,7 +80,7 @@ jobs:
           -eux -c "$cmd"
     - uses: actions/upload-artifact@main
       with:
-        name: artifact
+        name: artifact-bootstrap
         path: work/bootstrap
     - uses: actions/upload-artifact@main
       with:
@@ -95,7 +95,7 @@ jobs:
     - run: uglifyjs/run-nexe
     - uses: actions/upload-artifact@main
       with:
-        name: artifact
+        name: artifact-uglifyjs
         path: work/uglifyjs
 
   test:
@@ -105,7 +105,11 @@ jobs:
     - uses: actions/checkout@main
     - uses: actions/download-artifact@main
       with:
-        name: artifact
+        name: artifact-bootstrap
+        path: work
+    - uses: actions/download-artifact@main
+      with:
+        name: artifact-uglifyjs
         path: work
     - run: chmod +x work/uglifyjs
     - uses: actions/setup-go@main
@@ -143,12 +147,15 @@ jobs:
     steps:
     - uses: actions/download-artifact@main
       with:
-        name: artifact
+        name: artifact-bootstrap
+    - uses: actions/download-artifact@main
+      with:
+        name: artifact-uglifyjs
     - run: chmod +x bootstrap uglifyjs
     - run: zip -j imgconv.zip ./bootstrap ./uglifyjs
     - uses: actions/upload-artifact@main
       with:
-        name: artifact
+        name: artifact-imgconv
         path: imgconv.zip
 
   release:
@@ -160,7 +167,7 @@ jobs:
     steps:
     - uses: actions/download-artifact@main
       with:
-        name: artifact
+        name: artifact-imgconv
     - uses: actions/download-artifact@main
       with:
         name: build-number
