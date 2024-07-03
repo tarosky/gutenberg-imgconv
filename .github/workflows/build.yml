@@ -166,7 +166,7 @@ jobs:
         name: build-number
     - name: set BUILD_NUMBER
       run: echo "BUILD_NUMBER=$(< ./BUILD_NUMBER)" >> $GITHUB_ENV
-    - name: set BUILD_NUMBER
+    - name: set ASSET_NAME
       run: echo "ASSET_NAME=imgconv.build-$BUILD_NUMBER-awslambda-provided-amd64.zip" >> $GITHUB_ENV
     - name: rename
       run: cp imgconv.zip "$ASSET_NAME"
