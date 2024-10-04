@@ -87,27 +87,10 @@ jobs:
         name: build-number
         path: work/BUILD_NUMBER
 
-  build-uglifyjs:
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@main
-    - run: uglifyjs/build-image
-    - run: uglifyjs/run-nexe
-    - uses: actions/upload-artifact@main
-      with:
-        name: artifact-uglifyjs
-        path: work/uglifyjs
-
   test:
-    needs: build-uglifyjs
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@main
-    - uses: actions/download-artifact@main
-      with:
-        name: artifact-uglifyjs
-        path: work
-    - run: chmod +x work/uglifyjs
     - uses: actions/setup-go@main
       with:
         go-version: '~${{env.GO_VERSION}}'
@@ -138,17 +121,12 @@ jobs:
   bundle:
     needs:
     - build-go
-    - build-uglifyjs
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/download-artifact@main
       with:
         name: artifact-bootstrap
-    - uses: actions/download-artifact@main
-      with:
-        name: artifact-uglifyjs
-    - run: chmod +x bootstrap uglifyjs
-    - run: zip -j imgconv.zip ./bootstrap ./uglifyjs
+    - run: zip -j imgconv.zip ./bootstrap
     - uses: actions/upload-artifact@main
       with:
         name: artifact-imgconv

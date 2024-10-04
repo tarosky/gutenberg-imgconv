@@ -146,7 +146,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 	s.sendSQSMessages(entries)
 }
 
-func (s *ConvertSQSSuite) setupInvalidTasks(ctx context.Context, count int) {
+func (s *ConvertSQSSuite) setupInvalidTasks(count int) {
 	sqsEntries := make([]types.SendMessageBatchRequestEntry, 0, count)
 
 	for i := 0; i < count; i++ {
@@ -225,7 +225,7 @@ func (s *ConvertSQSSuite) TestConvertSQS200() {
 }
 
 func (s *ConvertSQSSuite) TestInvalidTasks() {
-	s.setupInvalidTasks(s.ctx, 2)
+	s.setupInvalidTasks(2)
 	s.env.ConvertSQSCLI(s.ctx)
 	s.Assert().Len(s.getObjectKeySet(), 0)
 	log := getLog(s.TestSuite)

@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -38,7 +36,6 @@ type Config struct {
 	RetrieverCount       uint8
 	DeleterCount         uint8
 	OrderStop            time.Duration
-	UglifyJSPath         string
 	Log                  *zap.Logger
 }
 
@@ -103,25 +100,9 @@ func createAWSConfig(ctx context.Context, cfg *Config) *aws.Config {
 	return &awsCfg
 }
 
-func uglifyJSPath(path string) string {
-	if path == "" {
-		ex, err := os.Executable()
-		if err != nil {
-			panic(err)
-		}
-		return filepath.Dir(ex) + "/uglifyjs"
-	}
-	p, err := filepath.Abs(path)
-	if err != nil {
-		panic(err)
-	}
-	return p
-}
-
 // NewEnvironment initializes values needed for execution.
 func NewEnvironment(ctx context.Context, cfg *Config) *Environment {
 	awsConfig := createAWSConfig(ctx, cfg)
-	cfg.UglifyJSPath = uglifyJSPath(cfg.UglifyJSPath)
 	minifier := minify.New()
 	minifyCSS := func(w io.Writer, r io.Reader, params map[string]string) error {
 		return (&css.Minifier{}).Minify(minifier, w, r, params)
