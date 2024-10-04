@@ -19,11 +19,11 @@ env:
   TEST_S3_ANOTHER_DEST_BUCKET: gutenberg-ext-imgconv-tests3anotherdestbucket-1xrab2bhory0u
   RELEASE_ACCESS_KEY_ID: AKIAQGFE5ESVD2ODKAC5
   REPO_BUCKET: gutenberg-ext-imgconv-repobucket-1bxd9jnafv4c5
-  GO_VERSION: 1.21.3
+  GO_VERSION: 1.23.2
 
 jobs:
   build-go:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@main
     - uses: actions/setup-go@main
@@ -88,7 +88,7 @@ jobs:
         path: work/BUILD_NUMBER
 
   test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@main
     - uses: actions/setup-go@main
@@ -121,7 +121,7 @@ jobs:
   bundle:
     needs:
     - build-go
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/download-artifact@main
       with:
@@ -137,7 +137,7 @@ jobs:
     - bundle
     - test
     if: github.ref == 'refs/heads/master'
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/download-artifact@main
       with:

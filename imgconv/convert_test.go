@@ -81,7 +81,7 @@ func (s *ConvertSuite) assertS3ImageObjectExists(path string) {
 		Key:    aws.String(s.s3Src.Prefix + path),
 	})
 	s.Require().NoError(err)
-	s.Assert().Greater(info.ContentLength, res.ContentLength, "file size has been decreased")
+	s.Assert().Greater(*info.ContentLength, *res.ContentLength, "file size has been decreased")
 	s3SrcObjTime, err := time.Parse(timestampLayout, info.Metadata[timestampMetadata])
 	s.Require().NoError(err)
 	s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
@@ -113,7 +113,7 @@ func (s *ConvertSuite) assertS3CSSObjectExists(path string) {
 		Key:    aws.String(s.s3Src.Prefix + path),
 	})
 	s.Require().NoError(err)
-	s.Assert().Greater(info.ContentLength, res.ContentLength, "file size has been decreased")
+	s.Assert().Greater(*info.ContentLength, *res.ContentLength, "file size has been decreased")
 	s3SrcObjTime, err := time.Parse(timestampLayout, info.Metadata[timestampMetadata])
 	s.Require().NoError(err)
 	s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
@@ -218,6 +218,6 @@ func (s *ConvertSuite) TestConvertJPGInAnotherSrcBucket() {
 		Key:    aws.String(s.s3Src.Prefix + path),
 	})
 	s.Require().NoError(err)
-	s.Assert().Greater(src.ContentLength, dest.ContentLength, "file size has been decreased")
+	s.Assert().Greater(*src.ContentLength, *dest.ContentLength, "file size has been decreased")
 	s.Assert().Equal(*src.LastModified, s3DestObjTime)
 }
