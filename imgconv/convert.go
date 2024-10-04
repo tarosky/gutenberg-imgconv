@@ -8,7 +8,6 @@ import (
 	"image"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -24,7 +23,6 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/chai2010/webp"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -292,164 +290,6 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		return nil
 	}
 
-	saveOriginalJSToFile := func(srcPath string, srcBody io.Reader) error {
-		file, err := os.Create(srcPath)
-		if err != nil {
-			e.log.Error("failed to create temporary file",
-				zapBucketField,
-				zapPathField,
-				zap.Error(err))
-			return err
-		}
-		defer func() {
-			if err := file.Close(); err != nil {
-				e.log.Error("failed to close copied JS file",
-					zapBucketField,
-					zapPathField,
-					zap.Error(err))
-			}
-		}()
-
-		if _, err := io.Copy(file, srcBody); err != nil {
-			e.log.Error("failed to save original JS file",
-				zapBucketField,
-				zapPathField,
-				zap.Error(err))
-			return err
-		}
-		return nil
-	}
-
-	uglifyJSCommand := func(
-		srcBody io.Reader,
-		minifiedJSPath string,
-		tempDir string,
-	) error {
-		srcPath := tempDir + "/src.js"
-		if err := saveOriginalJSToFile(srcPath, srcBody); err != nil {
-			return err
-		}
-
-		var stderrBuf bytes.Buffer
-		cmd := exec.CommandContext(
-			ctx,
-			e.Config.UglifyJSPath,
-			srcPath,
-			"--compress",
-			"--mangle",
-			"--keep-fnames",
-			"--source-map",
-			fmt.Sprintf("url='%s/%s.map',filename='%s',includeSources='%s'",
-				e.Config.BaseURL,
-				path,
-				filepath.Base(minifiedJSPath),
-				srcPath,
-			),
-			"--output",
-			minifiedJSPath,
-		)
-		cmd.Stdout = io.Discard
-		cmd.Stderr = &stderrBuf
-
-		if err := cmd.Run(); err != nil {
-			e.log.Info("failed to run uglifyjs",
-				zapBucketField,
-				zapPathField,
-				zap.Error(err),
-				zap.String("stderr", stderrBuf.String()),
-			)
-			return err
-		}
-
-		return nil
-	}
-
-	updateMinifiedJSS3Object := func(
-		ctx context.Context,
-		srcObj *s3.GetObjectOutput,
-		minifiedJSPath string,
-	) error {
-		jsFile, cleanup, err := openFile(minifiedJSPath)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		key := dest.Prefix + path
-
-		size, err := updateS3Object(ctx, srcObj, jsFile, key, javaScriptContentType)
-		if err != nil {
-			return err
-		}
-
-		if size != 0 {
-			e.log.Info("JavaScript minified",
-				zapBucketField,
-				zapPathField,
-				zap.String("dest-key", key),
-				zap.Int64("before", srcObj.ContentLength),
-				zap.Int64("after", size))
-		}
-		return nil
-	}
-
-	updateSourceMapS3Object := func(
-		ctx context.Context,
-		srcObj *s3.GetObjectOutput,
-		sourceMapPath string,
-	) error {
-		mapFile, cleanup, err := openFile(sourceMapPath)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-
-		key := dest.Prefix + path + ".map"
-
-		size, err := updateS3Object(ctx, srcObj, mapFile, key, sourceMapContentType)
-		if err != nil {
-			return err
-		}
-
-		if size != 0 {
-			e.log.Info("source map generated",
-				zapBucketField,
-				zapPathField,
-				zap.String("dest-key", key),
-				zap.Int64("size", size))
-		}
-		return nil
-	}
-
-	minifyJavaScript := func(ctx context.Context, srcObj *s3.GetObjectOutput) error {
-		minifiedJSPath := ""
-		sourceMapPath := ""
-
-		if srcObj != nil {
-			tempDir, cleanup, err := createTempDir()
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
-			minifiedJSPath = tempDir + "/out.js"
-			sourceMapPath = tempDir + "/out.js.map"
-
-			if err := uglifyJSCommand(srcObj.Body, minifiedJSPath, tempDir); err != nil {
-				return err
-			}
-		}
-
-		errGroup, ctx := errgroup.WithContext(ctx)
-		errGroup.Go(func() error {
-			return updateMinifiedJSS3Object(ctx, srcObj, minifiedJSPath)
-		})
-		errGroup.Go(func() error {
-			return updateSourceMapS3Object(ctx, srcObj, sourceMapPath)
-		})
-		return errGroup.Wait()
-	}
-
 	updateMinifiedCSSS3Object := func(
 		ctx context.Context,
 		srcObj *s3.GetObjectOutput,
@@ -546,8 +386,6 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".jpg", ".jpeg", ".png", ".gif":
 		return convertImage(ctx, srcObj)
-	case ".js":
-		return minifyJavaScript(ctx, srcObj)
 	case ".css":
 		return minifyCSS(ctx, srcObj)
 	default:

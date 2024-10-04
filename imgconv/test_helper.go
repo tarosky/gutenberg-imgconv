@@ -24,7 +24,6 @@ import (
 const (
 	sampleJPEG = "samplefile/image.jpg"
 	samplePNG  = "samplefile/image.png"
-	sampleJS   = "samplefile/fizzbuzz.js"
 	sampleCSS  = "samplefile/style.css"
 )
 
@@ -88,7 +87,6 @@ func getTestConfig(name, logPath string) *Config {
 		RetrieverCount:       2,
 		DeleterCount:         2,
 		OrderStop:            30 * time.Second,
-		UglifyJSPath:         "work/uglifyjs",
 		Log:                  CreateLogger([]string{"stderr", logPath}),
 	}
 }

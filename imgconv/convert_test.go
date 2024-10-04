@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,11 +30,6 @@ func (s *ConvertSuite) SetupTest() {
 	eg.Go(func() error {
 		key := s.s3Src.Prefix + "dir/image.png"
 		copy(ctx, samplePNG, s.s3Src.Bucket, key, s.TestSuite)
-		return nil
-	})
-	eg.Go(func() error {
-		key := s.s3Src.Prefix + "dir/script.js"
-		copy(ctx, sampleJS, s.s3Src.Bucket, key, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
@@ -91,62 +85,6 @@ func (s *ConvertSuite) assertS3ImageObjectExists(path string) {
 	s3SrcObjTime, err := time.Parse(timestampLayout, info.Metadata[timestampMetadata])
 	s.Require().NoError(err)
 	s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
-}
-
-func (s *ConvertSuite) assertS3JSObjectExists(path string) {
-	info, err := s.env.S3Client.HeadObject(s.ctx, &s3.HeadObjectInput{
-		Bucket: &s.s3Src.Bucket,
-		Key:    aws.String(s.s3Src.Prefix + path),
-	})
-	s.Require().NoError(err)
-	s3SrcObjTime, err := time.Parse(timestampLayout, info.Metadata[timestampMetadata])
-	s.Require().NoError(err)
-
-	{
-		res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-			Bucket: &s.s3Dest.Bucket,
-			Key:    aws.String(s.s3Dest.Prefix + path),
-		})
-		s.Assert().NoError(err)
-		defer func() {
-			s.Require().NoError(res.Body.Close())
-		}()
-
-		var buf strings.Builder
-		_, err = io.Copy(&buf, res.Body)
-		s.Assert().NoError(err)
-		jsStr := buf.String()
-
-		s3DestObjTime, err := time.Parse(timestampLayout, res.Metadata[timestampMetadata])
-		s.Assert().NoError(err)
-		s.Assert().Equal(s.s3Src.Bucket, res.Metadata[bucketMetadata])
-		s.Assert().Equal(path, res.Metadata[pathMetadata])
-		s.Assert().Equal(javaScriptContentType, *res.ContentType)
-		s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
-
-		s.Assert().Greater(info.ContentLength, res.ContentLength, "file size has been decreased")
-		s.Assert().Greater(res.ContentLength, int64(100))
-		s.Assert().Contains(jsStr, "\n//# sourceMappingURL=https://example.com/dir/script.js.map")
-	}
-
-	{
-		res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
-			Bucket: &s.s3Dest.Bucket,
-			Key:    aws.String(s.s3Dest.Prefix + path + ".map"),
-		})
-		s.Assert().NoError(err)
-		defer func() {
-			s.Require().NoError(res.Body.Close())
-		}()
-		s3DestObjTime, err := time.Parse(timestampLayout, res.Metadata[timestampMetadata])
-		s.Assert().NoError(err)
-		s.Assert().Equal(s.s3Src.Bucket, res.Metadata[bucketMetadata])
-		s.Assert().Equal(path, res.Metadata[pathMetadata])
-		s.Assert().Equal(sourceMapContentType, *res.ContentType)
-		s.Assert().Equal(s3SrcObjTime, s3DestObjTime)
-
-		s.Assert().Greater(res.ContentLength, int64(400))
-	}
 }
 
 func (s *ConvertSuite) assertS3CSSObjectExists(path string) {
@@ -220,28 +158,6 @@ func (s *ConvertSuite) TestRemoveConvertedImage() {
 
 	s.Assert().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
 	s.assertS3ObjectNotExists(path + ".webp")
-}
-
-func (s *ConvertSuite) TestMinifyJS() {
-	s.Assert().NoError(s.env.Convert(s.ctx, "dir/script.js", &s.s3Src, &s.s3Dest))
-	s.assertS3JSObjectExists("dir/script.js")
-}
-
-func (s *ConvertSuite) TestRemoveMinifiedJS() {
-	path := "dir/script.js"
-	s.Require().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
-
-	{
-		_, err := s.env.S3Client.DeleteObject(s.ctx, &s3.DeleteObjectInput{
-			Bucket: &s.s3Src.Bucket,
-			Key:    aws.String(s.s3Src.Prefix + path),
-		})
-		s.Require().NoError(err)
-	}
-
-	s.Assert().NoError(s.env.Convert(s.ctx, path, &s.s3Src, &s.s3Dest))
-	s.assertS3ObjectNotExists(path)
-	s.assertS3ObjectNotExists(path + ".map")
 }
 
 func (s *ConvertSuite) TestMinifyCSS() {
