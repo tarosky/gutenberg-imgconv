@@ -92,11 +92,11 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			return nil, err
 		}
 
-		if e.MaxFileSize < res.ContentLength {
+		if e.MaxFileSize < *res.ContentLength {
 			e.log.Warn("file is larger than predefined limit",
 				zapBucketField,
 				zapPathField,
-				zap.Int64("size", res.ContentLength),
+				zap.Int64("size", *res.ContentLength),
 				zap.Int64("max-file-size", e.MaxFileSize))
 			return nil, err
 		}
@@ -284,7 +284,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 				zapBucketField,
 				zapPathField,
 				zap.String("dest-key", key),
-				zap.Int64("before", srcObj.ContentLength),
+				zap.Int64("before", *srcObj.ContentLength),
 				zap.Int64("after", size))
 		}
 		return nil
@@ -313,7 +313,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 				zapBucketField,
 				zapPathField,
 				zap.String("dest-key", key),
-				zap.Int64("before", srcObj.ContentLength),
+				zap.Int64("before", *srcObj.ContentLength),
 				zap.Int64("after", size))
 		}
 		return nil
