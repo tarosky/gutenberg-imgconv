@@ -1,15 +1,15 @@
 package imgconv
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"image"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 
 	// Load image types for decoding
@@ -21,15 +21,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
-	"github.com/chai2010/webp"
 	"go.uber.org/zap"
 )
 
 const (
-	webPContentType       = "image/webp"
-	javaScriptContentType = "text/javascript"
-	cssContentType        = "text/css"
-	sourceMapContentType  = "application/octet-stream"
+	webPContentType = "image/webp"
+	cssContentType  = "text/css"
 
 	timestampMetadata = "original-timestamp"
 	bucketMetadata    = "original-bucket"
@@ -37,27 +34,6 @@ const (
 
 	timestampLayout = "2006-01-02T15:04:05.999Z07:00"
 )
-
-// atOnceWriter is used to avoid memory copy.
-type atOnceWriter struct {
-	p []byte
-}
-
-func newAtOnceWriter() *atOnceWriter {
-	return &atOnceWriter{}
-}
-
-func (w *atOnceWriter) Write(p []byte) (int, error) {
-	if w.p != nil {
-		return 0, fmt.Errorf("atOnceWriter doesn't allow second write")
-	}
-	w.p = p
-	return len(p), nil
-}
-
-func (w *atOnceWriter) Bytes() []byte {
-	return w.p
-}
 
 // Convert converts an image to WebP
 func (e *Environment) Convert(ctx context.Context, path string, src, dest *Location) error {
@@ -180,7 +156,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 	updateS3Object := func(
 		ctx context.Context,
 		srcObj *s3.GetObjectOutput,
-		body io.ReadSeeker,
+		body *os.File,
 		destKey string,
 		contentType string,
 	) (int64, error) {
@@ -243,38 +219,143 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		return afterSize, nil
 	}
 
-	encodeToWebP := func(srcObj *s3.GetObjectOutput) (io.ReadSeeker, error) {
+	encodeToWebP := func(srcObj *s3.GetObjectOutput, outFile string) error {
 		// Non-existent S3 object
 		if srcObj == nil {
-			return nil, nil
+			return nil
 		}
 
-		img, _, err := image.Decode(srcObj.Body)
+		inFile, err := os.CreateTemp("", "webp-input-")
 		if err != nil {
-			e.log.Info("failed to decode image",
+			e.log.Info("failed to create temp input file",
 				zapBucketField,
 				zapPathField,
 				zap.Error(err))
-			return nil, err
+			return err
 		}
 
-		writer := newAtOnceWriter()
-		webp.Encode(writer, img, &webp.Options{Quality: float32(e.WebPQuality)})
-		return bytes.NewReader(writer.Bytes()), nil
+		defer func() {
+			if err := os.Remove(inFile.Name()); err != nil {
+				e.log.Info("failed to remove temp input file",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
+			}
+		}()
+
+		if _, err := inFile.ReadFrom(srcObj.Body); err != nil {
+			e.log.Info("failed to save source object to temp input file",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
+			return err
+		}
+
+		if err := inFile.Close(); err != nil {
+			e.log.Info("failed to close temp input file",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
+			return err
+		}
+
+		cmd := exec.CommandContext(
+			ctx,
+			e.LibwebpCommandPath,
+			"-q",
+			strconv.Itoa(int(e.WebPQuality)),
+			inFile.Name(),
+			"-o",
+			outFile)
+
+		stdout := &strings.Builder{}
+		stderr := &strings.Builder{}
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
+
+		if err := cmd.Run(); err != nil {
+			e.log.Info("failed to decode image",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err),
+				zap.String("stdout", stdout.String()),
+				zap.String("stderr", stdout.String()))
+			return err
+		}
+
+		return nil
 	}
 
 	convertImage := func(
 		ctx context.Context,
 		srcObj *s3.GetObjectOutput,
 	) error {
-		webP, err := encodeToWebP(srcObj)
+		outFile, err := os.CreateTemp("", "webp-output-")
 		if err != nil {
+			e.log.Info("failed to create temp output file",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
+			return err
+		}
+
+		defer func() {
+			if err := os.Remove(outFile.Name()); err != nil {
+				e.log.Info("failed to remove temp output file",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
+			}
+		}()
+
+		if err := outFile.Close(); err != nil {
+			e.log.Info("failed to close temp output file",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
+			return err
+		}
+
+		outFileName := outFile.Name()
+
+		if err := encodeToWebP(srcObj, outFileName); err != nil {
 			return err
 		}
 
 		key := dest.Prefix + path + ".webp"
 
-		size, err := updateS3Object(ctx, srcObj, webP, key, webPContentType)
+		outFile2, err := os.Open(outFileName)
+		if err != nil {
+			e.log.Info("failed to open temp output file",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
+			return err
+		}
+
+		defer func() {
+			if err := outFile2.Close(); err != nil {
+				e.log.Info("failed to close temp output file",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
+			}
+		}()
+
+		stat, err := outFile2.Stat()
+		if err != nil {
+			e.log.Error("failed to get stat",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
+			return err
+		}
+
+		if stat.Size() == 0 {
+			outFile2 = nil
+		}
+
+		size, err := updateS3Object(ctx, srcObj, outFile2, key, webPContentType)
 		if err != nil {
 			return err
 		}
