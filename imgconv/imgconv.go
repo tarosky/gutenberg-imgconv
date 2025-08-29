@@ -31,6 +31,7 @@ type Config struct {
 	SQSQueueURL          string
 	SQSVisibilityTimeout uint
 	MaxFileSize          int64
+	LibwebpCommandPath   string
 	WebPQuality          uint8
 	WorkerCount          uint8
 	RetrieverCount       uint8

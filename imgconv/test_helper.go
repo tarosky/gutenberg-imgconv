@@ -82,6 +82,7 @@ func getTestConfig(name, logPath string) *Config {
 		SQSQueueURL:          sqsURL,
 		SQSVisibilityTimeout: 2,
 		MaxFileSize:          10 * 1024 * 1024,
+		LibwebpCommandPath:   "work/libwebp/bin/cwebp",
 		WebPQuality:          80,
 		WorkerCount:          3,
 		RetrieverCount:       2,

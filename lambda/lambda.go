@@ -69,6 +69,13 @@ func getEnvFileSize(key string, fallback string) int64 {
 	return fsize
 }
 
+func getEnvString(key string, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
 func getEnvUint8(key string, fallback uint8) uint8 {
 	if value, ok := os.LookupEnv(key); ok {
 		v, err := strconv.ParseUint(value, 10, 8)
@@ -102,6 +109,7 @@ func main() {
 		SQSQueueURL:          os.Getenv("SQS_QUEUE_URL"),
 		SQSVisibilityTimeout: getEnvUint("SQS_VISIBILITY_TIMEOUT", 300),
 		MaxFileSize:          getEnvFileSize("MAX_FILE_SIZE", "100MiB"),
+		LibwebpCommandPath:   getEnvString("LIBWEBP_COMMAND_PATH", "libwebp/bin/cwebp"),
 		WebPQuality:          getEnvUint8("WEBP_QUALITY", 80),
 		WorkerCount:          getEnvUint8("WORKER_COUNT", 10),
 		RetrieverCount:       getEnvUint8("RETRIEVER_COUNT", 2),
