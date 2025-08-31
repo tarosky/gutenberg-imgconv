@@ -25,7 +25,7 @@ env:
 
 jobs:
   build-go:
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@main
     - uses: actions/setup-go@main
@@ -122,7 +122,7 @@ jobs:
         files: work/report.xml
 
   build-libavif:
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-24.04-arm
     steps:
     - name: Build on the same machine image as AWS Lambda
       # Add "safe.directory" to avoid "detected dubious ownership in repository" error.
