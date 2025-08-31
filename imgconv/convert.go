@@ -8,14 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
-
-	// Load image types for decoding
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -25,12 +19,18 @@ import (
 )
 
 const (
+	webPExtension = ".webp"
+	avifExtension = ".avif"
+
 	webPContentType = "image/webp"
+	avifContentType = "image/avif"
 	cssContentType  = "text/css"
 
-	timestampMetadata = "original-timestamp"
-	bucketMetadata    = "original-bucket"
-	pathMetadata      = "original-path"
+	timestampMetadata       = "original-timestamp"
+	bucketMetadata          = "original-bucket"
+	pathMetadata            = "original-path"
+	optimizeTypeMetadata    = "optimize-type"
+	optimizeQualityMetadata = "optimize-quality"
 
 	timestampLayout = "2006-01-02T15:04:05.999Z07:00"
 )
@@ -153,6 +153,24 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		return srcObj.LastModified.UTC().Format(timestampLayout)
 	}
 
+	deleteS3Object := func(ctx context.Context, destKey string) error {
+		if _, err := e.S3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: &dest.Bucket,
+			Key:    &destKey,
+		}); err != nil {
+			e.log.Error("unable to DELETE S3 object",
+				zapBucketField,
+				zapPathField,
+				zap.Error(err))
+			return err
+		}
+
+		e.log.Info("reflected deletion",
+			zapPathField,
+			zap.String("dest-key", destKey))
+		return nil
+	}
+
 	updateS3Object := func(
 		ctx context.Context,
 		srcObj *s3.GetObjectOutput,
@@ -160,25 +178,6 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		destKey string,
 		contentType string,
 	) (int64, error) {
-		// Avoid nil-comparison pitfall
-		if body == nil || reflect.ValueOf(body).IsNil() {
-			if _, err := e.S3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-				Bucket: &dest.Bucket,
-				Key:    &destKey,
-			}); err != nil {
-				e.log.Error("unable to DELETE S3 object",
-					zapBucketField,
-					zapPathField,
-					zap.Error(err))
-				return 0, err
-			}
-
-			e.log.Info("reflected deletion",
-				zapPathField,
-				zap.String("dest-key", destKey))
-			return 0, nil
-		}
-
 		timestamp := getTimestamp(srcObj)
 		if timestamp == "" {
 			e.log.Error("no timestamp",
@@ -219,12 +218,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		return afterSize, nil
 	}
 
-	encodeToWebP := func(srcObj *s3.GetObjectOutput, outFile string) error {
-		// Non-existent S3 object
-		if srcObj == nil {
-			return nil
-		}
-
+	encodeToWebP := func(srcObj *s3.GetObjectOutput, outFile string, useAVIF bool) error {
 		inFile, err := os.CreateTemp("", "webp-input-")
 		if err != nil {
 			e.log.Info("failed to create temp input file",
@@ -259,14 +253,38 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			return err
 		}
 
-		cmd := exec.CommandContext(
-			ctx,
-			e.LibwebpCommandPath,
-			"-q",
-			strconv.Itoa(int(e.WebPQuality)),
-			inFile.Name(),
-			"-o",
-			outFile)
+		quality := strconv.Itoa(int(e.ImageQuality))
+		if optimizeQuality, ok := srcObj.Metadata[optimizeQualityMetadata]; ok {
+			q, err := strconv.ParseUint(optimizeQuality, 10, 8)
+			if err != nil {
+				e.log.Info("incorrect optimize-quality metadata passed",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
+				return err
+			}
+			quality = strconv.Itoa(int(q))
+		}
+
+		var cmd *exec.Cmd
+		if useAVIF {
+			cmd = exec.CommandContext(
+				ctx,
+				e.LibavifCommandPath,
+				"-q",
+				quality,
+				inFile.Name(),
+				outFile)
+		} else {
+			cmd = exec.CommandContext(
+				ctx,
+				e.LibwebpCommandPath,
+				"-q",
+				quality,
+				inFile.Name(),
+				"-o",
+				outFile)
+		}
 
 		stdout := &strings.Builder{}
 		stderr := &strings.Builder{}
@@ -290,6 +308,17 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		ctx context.Context,
 		srcObj *s3.GetObjectOutput,
 	) error {
+		if srcObj == nil {
+			if err := deleteS3Object(ctx, dest.Prefix+path+webPExtension); err != nil {
+				return err
+			}
+			if err := deleteS3Object(ctx, dest.Prefix+path+avifExtension); err != nil {
+				return err
+			}
+
+			return nil
+		}
+
 		outFile, err := os.CreateTemp("", "webp-output-")
 		if err != nil {
 			e.log.Info("failed to create temp output file",
@@ -318,11 +347,21 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 
 		outFileName := outFile.Name()
 
-		if err := encodeToWebP(srcObj, outFileName); err != nil {
+		useAVIF := false
+		if optimizeType, ok := srcObj.Metadata[optimizeTypeMetadata]; ok && optimizeType == "avif" {
+			useAVIF = true
+		}
+
+		if err := encodeToWebP(srcObj, outFileName, useAVIF); err != nil {
 			return err
 		}
 
-		key := dest.Prefix + path + ".webp"
+		extension := webPExtension
+		if useAVIF {
+			extension = avifExtension
+		}
+
+		key := dest.Prefix + path + extension
 
 		outFile2, err := os.Open(outFileName)
 		if err != nil {
@@ -342,32 +381,23 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			}
 		}()
 
-		stat, err := outFile2.Stat()
-		if err != nil {
-			e.log.Error("failed to get stat",
-				zapBucketField,
-				zapPathField,
-				zap.Error(err))
-			return err
+		contentType := webPContentType
+		if useAVIF {
+			contentType = avifContentType
 		}
 
-		if stat.Size() == 0 {
-			outFile2 = nil
-		}
-
-		size, err := updateS3Object(ctx, srcObj, outFile2, key, webPContentType)
+		size, err := updateS3Object(ctx, srcObj, outFile2, key, contentType)
 		if err != nil {
 			return err
 		}
 
-		if size != 0 {
-			e.log.Info("converted",
-				zapBucketField,
-				zapPathField,
-				zap.String("dest-key", key),
-				zap.Int64("before", *srcObj.ContentLength),
-				zap.Int64("after", size))
-		}
+		e.log.Info("converted",
+			zapBucketField,
+			zapPathField,
+			zap.String("dest-key", key),
+			zap.Int64("before", *srcObj.ContentLength),
+			zap.Int64("after", size))
+
 		return nil
 	}
 
@@ -376,6 +406,14 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		srcObj *s3.GetObjectOutput,
 		minifiedCSSPath string,
 	) error {
+		if srcObj == nil {
+			if err := deleteS3Object(ctx, dest.Prefix+path); err != nil {
+				return err
+			}
+
+			return nil
+		}
+
 		cssFile, cleanup, err := openFile(minifiedCSSPath)
 		if err != nil {
 			return err
@@ -389,14 +427,13 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			return err
 		}
 
-		if size != 0 {
-			e.log.Info("CSS minified",
-				zapBucketField,
-				zapPathField,
-				zap.String("dest-key", key),
-				zap.Int64("before", *srcObj.ContentLength),
-				zap.Int64("after", size))
-		}
+		e.log.Info("CSS minified",
+			zapBucketField,
+			zapPathField,
+			zap.String("dest-key", key),
+			zap.Int64("before", *srcObj.ContentLength),
+			zap.Int64("after", size))
+
 		return nil
 	}
 

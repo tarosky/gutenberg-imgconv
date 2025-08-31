@@ -55,7 +55,7 @@ func main() {
 			Value:   "20MiB",
 		},
 		&cli.UintFlag{
-			Name:    "webp-quality",
+			Name:    "image-quality",
 			Aliases: []string{"q"},
 			Value:   80,
 		},
@@ -76,7 +76,7 @@ func main() {
 			BaseURL:        c.String("base-url"),
 			S3StorageClass: types.StorageClass(c.String("s3-storage-class")),
 			MaxFileSize:    fsize,
-			WebPQuality:    uint8(c.Uint("webp-quality")),
+			ImageQuality:   uint8(c.Uint("image-quality")),
 			Log:            log,
 		}
 

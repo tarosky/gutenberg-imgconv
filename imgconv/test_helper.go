@@ -22,9 +22,11 @@ import (
 )
 
 const (
-	sampleJPEG = "samplefile/image.jpg"
-	samplePNG  = "samplefile/image.png"
-	sampleCSS  = "samplefile/style.css"
+	sampleJPEG  = "samplefile/image.jpg"
+	samplePNG   = "samplefile/image.png"
+	sampleJPEG2 = "samplefile/image2.jpg"
+	samplePNG2  = "samplefile/image2.png"
+	sampleCSS   = "samplefile/style.css"
 )
 
 // InitTest moves working directory to project root directory.
@@ -83,7 +85,8 @@ func getTestConfig(name, logPath string) *Config {
 		SQSVisibilityTimeout: 2,
 		MaxFileSize:          10 * 1024 * 1024,
 		LibwebpCommandPath:   "work/libwebp/bin/cwebp",
-		WebPQuality:          80,
+		LibavifCommandPath:   "work/libavif/avifenc",
+		ImageQuality:         80,
 		WorkerCount:          3,
 		RetrieverCount:       2,
 		DeleterCount:         2,
@@ -157,7 +160,7 @@ func getLog(s *TestSuite) string {
 	return string(bs)
 }
 
-func copy(ctx context.Context, src, bucket, key string, s *TestSuite) {
+func copy(ctx context.Context, src, bucket, key string, optimizeType, optimizeQuality *string, s *TestSuite) {
 	in, err := os.Open(src)
 	s.Require().NoError(err)
 	defer func() {
@@ -167,27 +170,47 @@ func copy(ctx context.Context, src, bucket, key string, s *TestSuite) {
 	info, err := in.Stat()
 	s.Require().NoError(err)
 
+	metadata := map[string]string{
+		pathMetadata:      src,
+		timestampMetadata: info.ModTime().UTC().Format(timestampLayout),
+	}
+
+	if optimizeType != nil {
+		metadata[optimizeTypeMetadata] = *optimizeType
+	}
+
+	if optimizeQuality != nil {
+		metadata[optimizeQualityMetadata] = *optimizeQuality
+	}
+
 	{
 		_, err := s.env.S3Client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket:       &bucket,
 			Key:          &key,
 			Body:         in,
 			StorageClass: s.env.S3StorageClass,
-			Metadata: map[string]string{
-				pathMetadata:      src,
-				timestampMetadata: info.ModTime().UTC().Format(timestampLayout),
-			},
+			Metadata:     metadata,
 		})
 		s.Require().NoError(err)
 	}
 }
 
-func copyAsOtherSource(ctx context.Context, src, bucket, key string, s *TestSuite) {
+func copyAsOtherSource(ctx context.Context, src, bucket, key string, optimizeType, optimizeQuality *string, s *TestSuite) {
 	in, err := os.Open(src)
 	s.Require().NoError(err)
 	defer func() {
 		s.Require().NoError(in.Close())
 	}()
+
+	metadata := map[string]string{}
+
+	if optimizeType != nil {
+		metadata[optimizeTypeMetadata] = *optimizeType
+	}
+
+	if optimizeQuality != nil {
+		metadata[optimizeQualityMetadata] = *optimizeQuality
+	}
 
 	{
 		_, err := s.env.S3Client.PutObject(ctx, &s3.PutObjectInput{
@@ -195,6 +218,7 @@ func copyAsOtherSource(ctx context.Context, src, bucket, key string, s *TestSuit
 			Key:          &key,
 			Body:         in,
 			StorageClass: types.StorageClassStandard,
+			Metadata:     metadata,
 		})
 		s.Require().NoError(err)
 	}
