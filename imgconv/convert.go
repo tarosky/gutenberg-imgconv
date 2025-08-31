@@ -218,7 +218,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		return afterSize, nil
 	}
 
-	encodeToWebP := func(srcObj *s3.GetObjectOutput, outFile string, useAVIF bool) error {
+	encodeImage := func(srcObj *s3.GetObjectOutput, outFile string, useAVIF bool, quality uint8) error {
 		inFile, err := os.CreateTemp("", "webp-input-")
 		if err != nil {
 			e.log.Info("failed to create temp input file",
@@ -253,26 +253,13 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			return err
 		}
 
-		quality := strconv.Itoa(int(e.ImageQuality))
-		if optimizeQuality, ok := srcObj.Metadata[optimizeQualityMetadata]; ok {
-			q, err := strconv.ParseUint(optimizeQuality, 10, 8)
-			if err != nil {
-				e.log.Info("incorrect optimize-quality metadata passed",
-					zapBucketField,
-					zapPathField,
-					zap.Error(err))
-				return err
-			}
-			quality = strconv.Itoa(int(q))
-		}
-
 		var cmd *exec.Cmd
 		if useAVIF {
 			cmd = exec.CommandContext(
 				ctx,
 				e.LibavifCommandPath,
 				"-q",
-				quality,
+				strconv.Itoa(int(quality)),
 				inFile.Name(),
 				outFile)
 		} else {
@@ -280,7 +267,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 				ctx,
 				e.LibwebpCommandPath,
 				"-q",
-				quality,
+				strconv.Itoa(int(quality)),
 				inFile.Name(),
 				"-o",
 				outFile)
@@ -352,7 +339,20 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			useAVIF = true
 		}
 
-		if err := encodeToWebP(srcObj, outFileName, useAVIF); err != nil {
+		quality := e.ImageQuality
+		if optimizeQuality, ok := srcObj.Metadata[optimizeQualityMetadata]; ok {
+			q, err := strconv.ParseUint(optimizeQuality, 10, 8)
+			if err != nil {
+				e.log.Info("incorrect optimize-quality metadata passed",
+					zapBucketField,
+					zapPathField,
+					zap.Error(err))
+				return err
+			}
+			quality = uint8(q)
+		}
+
+		if err := encodeImage(srcObj, outFileName, useAVIF, quality); err != nil {
 			return err
 		}
 
@@ -391,10 +391,17 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			return err
 		}
 
+		optimizeType := "webp"
+		if useAVIF {
+			optimizeType = "avif"
+		}
+
 		e.log.Info("converted",
 			zapBucketField,
 			zapPathField,
 			zap.String("dest-key", key),
+			zap.String("type", optimizeType),
+			zap.Uint8("quality", quality),
 			zap.Int64("before", *srcObj.ContentLength),
 			zap.Int64("after", size))
 
