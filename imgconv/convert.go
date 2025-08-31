@@ -177,6 +177,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 		body *os.File,
 		destKey string,
 		contentType string,
+		quality *uint8,
 	) (int64, error) {
 		timestamp := getTimestamp(srcObj)
 		if timestamp == "" {
@@ -196,17 +197,22 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			return 0, err
 		}
 
+		metadata := make(map[string]string, 4)
+		metadata[bucketMetadata] = src.Bucket
+		metadata[pathMetadata] = path
+		metadata[timestampMetadata] = timestamp
+
+		if quality != nil {
+			metadata[optimizeQualityMetadata] = strconv.Itoa(int(*quality))
+		}
+
 		if _, err := e.S3Client.PutObject(ctx, &s3.PutObjectInput{
 			Body:         body,
 			Bucket:       &dest.Bucket,
 			ContentType:  &contentType,
 			Key:          &destKey,
 			StorageClass: e.S3StorageClass,
-			Metadata: map[string]string{
-				bucketMetadata:    src.Bucket,
-				pathMetadata:      path,
-				timestampMetadata: timestamp,
-			},
+			Metadata:     metadata,
 		}); err != nil {
 			e.log.Error("unable to PUT to S3",
 				zapBucketField,
@@ -386,7 +392,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			contentType = avifContentType
 		}
 
-		size, err := updateS3Object(ctx, srcObj, outFile2, key, contentType)
+		size, err := updateS3Object(ctx, srcObj, outFile2, key, contentType, &quality)
 		if err != nil {
 			return err
 		}
@@ -429,7 +435,7 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 
 		key := dest.Prefix + path
 
-		size, err := updateS3Object(ctx, srcObj, cssFile, key, cssContentType)
+		size, err := updateS3Object(ctx, srcObj, cssFile, key, cssContentType, nil)
 		if err != nil {
 			return err
 		}
