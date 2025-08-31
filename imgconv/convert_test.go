@@ -21,25 +21,38 @@ type ConvertSuite struct {
 func (s *ConvertSuite) SetupTest() {
 	s.env = newTestEnvironment(s.ctx, "convert", s.TestSuite)
 
+	typeAVIF := "avif"
+	quality60 := "60"
+
 	eg, ctx := errgroup.WithContext(s.ctx)
 	eg.Go(func() error {
 		key := s.s3Src.Prefix + "dir/image.jpg"
-		copy(ctx, sampleJPEG, s.s3Src.Bucket, key, s.TestSuite)
+		copy(ctx, sampleJPEG, s.s3Src.Bucket, key, nil, nil, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
 		key := s.s3Src.Prefix + "dir/image.png"
-		copy(ctx, samplePNG, s.s3Src.Bucket, key, s.TestSuite)
+		copy(ctx, samplePNG, s.s3Src.Bucket, key, nil, nil, s.TestSuite)
+		return nil
+	})
+	eg.Go(func() error {
+		key := s.s3Src.Prefix + "dir/image2.jpg"
+		copy(ctx, sampleJPEG2, s.s3Src.Bucket, key, &typeAVIF, &quality60, s.TestSuite)
+		return nil
+	})
+	eg.Go(func() error {
+		key := s.s3Src.Prefix + "dir/image2.png"
+		copy(ctx, samplePNG2, s.s3Src.Bucket, key, &typeAVIF, &quality60, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
 		key := s.s3Src.Prefix + "dir/style.css"
-		copy(ctx, sampleCSS, s.s3Src.Bucket, key, s.TestSuite)
+		copy(ctx, sampleCSS, s.s3Src.Bucket, key, nil, nil, s.TestSuite)
 		return nil
 	})
 	eg.Go(func() error {
 		key := s.s3Src.Prefix + "dir/image.jpg"
-		copyAsOtherSource(ctx, sampleJPEG, s.s3AnotherSrcBucket, key, s.TestSuite)
+		copyAsOtherSource(ctx, sampleJPEG, s.s3AnotherSrcBucket, key, nil, nil, s.TestSuite)
 		return nil
 	})
 	eg.Wait()
@@ -54,12 +67,12 @@ func TestConvertSuite(t *testing.T) {
 	suite.Run(t, s)
 }
 
-func (s *ConvertSuite) assertS3ImageObjectExists(path string) {
+func (s *ConvertSuite) assertS3ImageObjectExists(path, extension, contentType string) {
 	res, err := s.env.S3Client.GetObject(s.ctx, &s3.GetObjectInput{
 		Bucket: &s.s3Dest.Bucket,
-		Key:    aws.String(s.s3Dest.Prefix + path + ".webp"),
+		Key:    aws.String(s.s3Dest.Prefix + path + extension),
 	})
-	s.Assert().NoError(err)
+	s.Assert().NoError(err, s.s3Dest.Prefix+path+extension)
 	defer func() {
 		s.Require().NoError(res.Body.Close())
 	}()
@@ -69,12 +82,19 @@ func (s *ConvertSuite) assertS3ImageObjectExists(path string) {
 		_, err := res.Body.Read(head)
 		s.Require().True(err == nil || err == io.EOF)
 	}
-	s.Assert().Equal(webPContentType, http.DetectContentType(head))
+
+	// Workaround: AVIF type cannot be sniffed as of 2025-08-31
+	// https://github.com/whatwg/mimesniff/issues/143
+	if contentType == "image/avif" {
+		s.Assert().Equal("application/octet-stream", http.DetectContentType(head))
+	} else {
+		s.Assert().Equal(contentType, http.DetectContentType(head))
+	}
 	s3DestObjTime, err := time.Parse(timestampLayout, res.Metadata[timestampMetadata])
 	s.Assert().NoError(err)
 	s.Assert().Equal(s.s3Src.Bucket, res.Metadata[bucketMetadata])
 	s.Assert().Equal(path, res.Metadata[pathMetadata])
-	s.Assert().Equal(webPContentType, *res.ContentType)
+	s.Assert().Equal(contentType, *res.ContentType)
 
 	info, err := s.env.S3Client.HeadObject(s.ctx, &s3.HeadObjectInput{
 		Bucket: &s.s3Src.Bucket,
@@ -131,12 +151,22 @@ func (s *ConvertSuite) assertS3ObjectNotExists(path string) {
 
 func (s *ConvertSuite) TestConvertJPG() {
 	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image.jpg", &s.s3Src, &s.s3Dest))
-	s.assertS3ImageObjectExists("dir/image.jpg")
+	s.assertS3ImageObjectExists("dir/image.jpg", webPExtension, webPContentType)
+}
+
+func (s *ConvertSuite) TestConvertJPGToAVIF() {
+	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image2.jpg", &s.s3Src, &s.s3Dest))
+	s.assertS3ImageObjectExists("dir/image2.jpg", avifExtension, avifContentType)
 }
 
 func (s *ConvertSuite) TestConvertPNG() {
 	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image.png", &s.s3Src, &s.s3Dest))
-	s.assertS3ImageObjectExists("dir/image.png")
+	s.assertS3ImageObjectExists("dir/image.png", webPExtension, webPContentType)
+}
+
+func (s *ConvertSuite) TestConvertPNGToAVIF() {
+	s.Assert().NoError(s.env.Convert(s.ctx, "dir/image2.png", &s.s3Src, &s.s3Dest))
+	s.assertS3ImageObjectExists("dir/image2.png", avifExtension, avifContentType)
 }
 
 func (s *ConvertSuite) TestConvertNonExistent() {

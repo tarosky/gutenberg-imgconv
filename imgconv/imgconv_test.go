@@ -91,7 +91,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 		i := i
 		eg.Go(func() error {
 			path := fmt.Sprintf("dir/image%03d.jpg", i)
-			copy(ctx, sampleJPEG, s.s3Src.Bucket, s.s3Src.Prefix+path, s.TestSuite)
+			copy(ctx, sampleJPEG, s.s3Src.Bucket, s.s3Src.Prefix+path, nil, nil, s.TestSuite)
 			jb, err := json.Marshal(&task{
 				Version: 2,
 				Path:    path,
@@ -118,7 +118,7 @@ func (s *ConvertSQSSuite) setupImages(ctx context.Context, jpgCount, pngCount in
 		eg.Go(func() error {
 			path := fmt.Sprintf("dir/image%03d.png", i)
 			copyAsOtherSource(
-				ctx, samplePNG, s.s3AnotherSrcBucket, s.s3Src.Prefix+path, s.TestSuite)
+				ctx, samplePNG, s.s3AnotherSrcBucket, s.s3Src.Prefix+path, nil, nil, s.TestSuite)
 			jb, err := json.Marshal(&task{
 				Version: 2,
 				Src: Location{

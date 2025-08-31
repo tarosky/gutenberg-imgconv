@@ -56,7 +56,7 @@ func main() {
 			Value:   "20MiB",
 		},
 		&cli.UintFlag{
-			Name:    "webp-quality",
+			Name:    "image-quality",
 			Aliases: []string{"q"},
 			Value:   80,
 		},
@@ -94,7 +94,7 @@ func main() {
 			SQSQueueURL:          c.String("sqs-queue-url"),
 			SQSVisibilityTimeout: c.Uint("sqs-vilibility-timeout"),
 			MaxFileSize:          fsize,
-			WebPQuality:          uint8(c.Uint("webp-quality")),
+			ImageQuality:         uint8(c.Uint("image-quality")),
 			RetrieverCount:       uint8(c.Uint("retriever-count")),
 			WorkerCount:          uint8(c.Uint("worker-count")),
 			DeleterCount:         uint8(c.Uint("deleter-count")),

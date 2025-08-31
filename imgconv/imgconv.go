@@ -32,7 +32,8 @@ type Config struct {
 	SQSVisibilityTimeout uint
 	MaxFileSize          int64
 	LibwebpCommandPath   string
-	WebPQuality          uint8
+	LibavifCommandPath   string
+	ImageQuality         uint8
 	WorkerCount          uint8
 	RetrieverCount       uint8
 	DeleterCount         uint8
