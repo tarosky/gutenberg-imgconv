@@ -272,6 +272,8 @@ func (e *Environment) Convert(ctx context.Context, path string, src, dest *Locat
 			cmd = exec.CommandContext(
 				ctx,
 				e.LibwebpCommandPath,
+				"-metadata",
+				"icc",
 				"-q",
 				strconv.Itoa(int(quality)),
 				inFile.Name(),
